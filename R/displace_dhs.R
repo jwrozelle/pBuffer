@@ -50,20 +50,23 @@ pb_displace_once_dhs <- function(sfDataset,
                                  urban_max = 2000,
                                  uniform_area = FALSE) {
   
-  if (!inherits(sfDataset, "sf")) {
-    stop("sfDataset must be an sf object.")
-  }
-  if (!inherits(sf::st_geometry(sfDataset), "sfc_POINT")) {
-    stop("sfDataset must have POINT geometry.")
-  }
-  if (!urban_col %in% names(sfDataset)) {
-    stop("sfDataset must contain the urban/rural column: ", urban_col)
-  }
+  pb_check_sf(sfDataset, "sfDataset")
+  pb_check_geom_type(sfDataset, "POINT", "sfDataset")
   
+  pb_check_cols(sfDataset, urban_col, "sfDataset")
+  
+  # CRS: must exist (either on object or provided) AND must be projected in meters
   crs_in <- sf::st_crs(sfDataset)
   if (is.null(crs_in) && is.null(useCRS)) {
-    stop("Input CRS is missing. Provide useCRS or set CRS on sfDataset.")
+    stop("Input CRS is missing. Provide useCRS or set CRS on sfDataset.", call. = FALSE)
   }
+  
+  # If useCRS supplied, apply temporarily for validation of projected-ness
+  if (!is.null(useCRS) && is.null(crs_in)) {
+    sf::st_crs(sfDataset) <- sf::st_crs(useCRS)
+  }
+  pb_check_projected(sfDataset, "sfDataset")
+  
   
   # Output CRS: default to input CRS unless overridden
   crs_out <- if (is.null(useCRS)) crs_in else sf::st_crs(useCRS)

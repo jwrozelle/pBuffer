@@ -80,3 +80,52 @@ pb_check_unique_id <- function(x, id_col, arg_name = "object") {
   }
   invisible(TRUE)
 }
+
+# Check object is raster::RasterLayer
+pb_check_rasterlayer <- function(x, arg_name = "inputRaster") {
+  if (!inherits(x, "RasterLayer")) {
+    stop(arg_name, " must be a raster::RasterLayer.", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+# Check a numeric scalar is positive
+pb_check_pos_scalar <- function(x, arg_name = "value") {
+  if (!is.numeric(x) || length(x) != 1 || is.na(x) || x <= 0) {
+    stop(arg_name, " must be a single positive number.", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+# Check a numeric vector is within [0,1]
+pb_check_prob_vec <- function(x, arg_name = "prob") {
+  if (!is.numeric(x) || anyNA(x) || any(x < 0 | x > 1)) {
+    stop(arg_name, " must be a numeric vector in [0, 1].", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+# Check no missing values for required columns
+pb_check_no_na <- function(x, cols, arg_name = "object") {
+  pb_check_cols(x, cols, arg_name)
+  bad <- vapply(cols, function(cc) anyNA(x[[cc]]), logical(1))
+  if (any(bad)) {
+    stop(arg_name, " has NA in required column(s): ", paste(cols[bad], collapse = ", "), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+# Normalize weights with a tolerance option for sum-to-1 checks
+pb_check_weights_sum1 <- function(w, tol = 1e-8, arg_name = "weights") {
+  if (!is.numeric(w)) stop(arg_name, " must be numeric.", call. = FALSE)
+  s <- sum(w, na.rm = TRUE)
+  if (!is.finite(s) || abs(s - 1) > tol) {
+    stop(arg_name, " must sum to 1 (within tol = ", tol, "). Got ", s, ".", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+
+
+
+

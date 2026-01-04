@@ -70,29 +70,24 @@ pb_rasterValJoin <- function(displaced.sf,
                              n.cores = 1,
                              eps = 1e-6) {
   
-  # --- validation ---
-  if (!inherits(displaced.sf, "sf")) stop("displaced.sf must be an sf object.")
-  if (!inherits(sf::st_geometry(displaced.sf), "sfc_POINT")) stop("displaced.sf must have POINT geometry.")
-  if (!inherits(inputRaster, "RasterLayer")) stop("inputRaster must be a raster::RasterLayer.")
-  if (!is.numeric(bufferlength) || length(bufferlength) != 1 || bufferlength <= 0) {
-    stop("bufferlength must be a single positive number.")
-  }
-  if (!displaced.id %in% names(displaced.sf)) stop("displaced.id not found in displaced.sf: ", displaced.id)
-  if (anyDuplicated(sf::st_drop_geometry(displaced.sf)[[displaced.id]]) > 0) {
-    stop("displaced.id must be unique per row in displaced.sf.")
-  }
+  # --- validation (centralized) ---
+  pb_check_sf(displaced.sf, "displaced.sf")
+  pb_check_geom_type(displaced.sf, "POINT", "displaced.sf")
+  pb_check_crs(displaced.sf, "displaced.sf")
+  pb_check_projected(displaced.sf, "displaced.sf")
+  
+  pb_check_rasterlayer(inputRaster, "inputRaster")
+  pb_check_pos_scalar(bufferlength, "bufferlength")
+  
+  pb_check_cols(displaced.sf, displaced.id, "displaced.sf")
+  pb_check_unique_id(sf::st_drop_geometry(displaced.sf), displaced.id, "displaced.sf")
   
   if (!is.null(adminBound)) {
-    if (!inherits(adminBound, "sf")) stop("adminBound must be an sf object if provided.")
-    if (!adminID %in% names(adminBound)) stop("adminID not found in adminBound: ", adminID)
+    pb_check_sf(adminBound, "adminBound")
+    pb_check_cols(adminBound, adminID, "adminBound")
+    pb_check_unique_id(sf::st_drop_geometry(adminBound), adminID, "adminBound")
   }
-  
-  # ensure CRS alignment for masking/intersection logic
-  # (raster has its own CRS string; compare via proj4string / wkt lightly)
-  if (!is.na(raster::crs(inputRaster)) && !is.na(sf::st_crs(displaced.sf))) {
-    # Users should generally pre-align these; we don't auto-project rasters here.
-    # We assume displaced.sf is already in the raster CRS.
-  }
+  #-----------------------------------
   
   raster_res <- raster::res(inputRaster)  # (xres, yres)
   
@@ -299,46 +294,29 @@ pb_quickRasterValJoin <- function(displaced.sf,
                                   adminID = NULL, 
                                   n.cores = 1) {
   
-  # ERRORS!
-  #   displaced.sf is the wrong class
-  if (!"sf" %in% class(displaced.sf)) {
-    stop("displaced.sf is not of class sf. It must be point features of class sf")
-  }
-  #   features2count.sf is the wrong class
-  if (!"RasterLayer" %in% class(inputRaster)) {
-    stop("inputRaster is not of class 'raster'. It must be point features of class 'raster'")
-  }
-  #   adminbBound is the wrong class
-  if (!is.null(adminBound) & !"sf" %in% class(adminBound)) {
-    stop("adminBound is not of class sf. It must be polygon features of class sf")
-  }
+  # --- validation (centralized) ---
+  pb_check_sf(displaced.sf, "displaced.sf")
+  pb_check_geom_type(displaced.sf, "POINT", "displaced.sf")
+  pb_check_crs(displaced.sf, "displaced.sf")
+  pb_check_projected(displaced.sf, "displaced.sf")
   
-  #   ensure that the adminBound sf object contains the unique ID
+  pb_check_rasterlayer(inputRaster, "inputRaster")
+  
+  pb_check_cols(displaced.sf, displaced.id, "displaced.sf")
+  pb_check_unique_id(sf::st_drop_geometry(displaced.sf), displaced.id, "displaced.sf")
+  
   if (!is.null(adminBound)) {
-    if (is.null(adminID)) stop("adminID must be provided when adminBound is provided.")
-    if (!adminID %in% names(adminBound)) {
-      stop(paste0(adminID, " is not found in the adminBound sf object."))
-    }
-    if (anyDuplicated(adminBound[[adminID]]) > 0) {
-      stop("adminID must specify a uniquely valid ID for the adminBound object.")
-    }
+    pb_check_sf(adminBound, "adminBound")
+    if (is.null(adminID)) stop("adminID must be provided when adminBound is provided.", call. = FALSE)
+    pb_check_cols(adminBound, adminID, "adminBound")
+    pb_check_unique_id(sf::st_drop_geometry(adminBound), adminID, "adminBound")
   }
   
-  
-  # if (!is.null(adminBound)) {
-  #   if (sum(duplicated(adminBound[[adminID]])) > 0) {
-  #     stop("adminID must specify a uniquely valid ID for the adminbound object")
-  #   }
-  # }
-  
-  #   ensure that the displaced.sf sf object contains the unique ID
-  if (!displaced.id %in% names(displaced.sf)) {
-    stop(paste0(displaced.id, " is not found in the displaced.sf sf object."))
+  # QUICK VERSION CURRENTLY SUPPORTS ONE BUFFERLENGTH ONLY
+  if (length(bufferlengths) != 1) {
+    stop("pb_quickRasterValJoin currently supports a single bufferlength. Pass one value at a time.", call. = FALSE)
   }
-  
-  if (sum(duplicated(displaced.sf[[displaced.id]])) > 0) {
-    stop("displaced.id must specify a uniquely valid ID for the displaced.sf object")
-  }
+  pb_check_pos_scalar(bufferlengths, "bufferlengths")
   
   warning("If the input raster has missing values, any probability buffer points that fall on the missing raster values will be excluded from the weighted score.")
   

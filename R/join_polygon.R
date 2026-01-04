@@ -28,6 +28,14 @@
 
 ml_polygon <- function(bufferPoints.sf, polygons.sf, polygons.id = "SPAID", weightsCol = "layer") {
   
+  #----validation-------
+  pb_check_sf(bufferPoints.sf, "bufferPoints.sf")
+  pb_check_sf(polygons.sf, "polygons.sf")
+  
+  pb_check_cols(polygons.sf, polygons.id, "polygons.sf")
+  pb_check_cols(bufferPoints.sf, weightsCol, "bufferPoints.sf")
+  
+  
   # Standardize column names BEFORE intersection so they propagate into the intersection result
   polygons.sf$SPAID <- polygons.sf[[polygons.id]]
   bufferPoints.sf$layer <- bufferPoints.sf[[weightsCol]]
@@ -38,9 +46,7 @@ ml_polygon <- function(bufferPoints.sf, polygons.sf, polygons.id = "SPAID", weig
   )
   
   # normalize intersection weights (not bufferPoints.sf)
-  w_sum <- sum(intersection$layer, na.rm = TRUE)
-  if (is.na(w_sum) || w_sum == 0) stop("intersection weights sum to 0 or NA.")
-  intersection$layer <- intersection$layer / w_sum
+  intersection$layer <- pb_normalize_weights(intersection$layer, "intersection weights")
   
   # non_missing <- length(intersection$SPAID)
   
@@ -362,7 +368,13 @@ pb_weightedPolyJoin <- function(displaced.sf,
           rm(singleDens.raster)
           
           # Get the most probable nearby health facility
-          probableMetrics.result <- weightedMetrics(singleDens.sf, polygons.sf, metrics = metrics)
+          probableMetrics.result <- pb_weighted_metrics(
+            bufferPoints.sf = singleDens.sf,
+            polygons.sf = polygons.sf,
+            poly_id = "SPAID",
+            weightVar = "layer",
+            metrics = metrics
+          )
           probableMetrics.df <- probableMetrics.result$weightedMetrics.df
           probableMetrics.df$DHSID <- rowDHSID
           probableMetrics.df$n_linked <- nrow(probableMetrics.result$hfWeights)
@@ -423,7 +435,13 @@ pb_weightedPolyJoin <- function(displaced.sf,
         rm(singleDens.raster)
         
         # Get the most probable nearby health facility
-        probableMetrics.result <- weightedMetrics(singleDens.sf, polygons.sf, metrics = metrics)
+        probableMetrics.result <- pb_weighted_metrics(
+          bufferPoints.sf = singleDens.sf,
+          polygons.sf = polygons.sf,
+          poly_id = "SPAID",
+          weightVar = "layer",
+          metrics = metrics
+        )
         probableMetrics.df <- probableMetrics.result$weightedMetrics.df
         probableMetrics.df$DHSID <- rowDHSID
         probableMetrics.df$n_linked <- nrow(probableMetrics.result$hfWeights)

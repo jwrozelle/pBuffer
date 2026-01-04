@@ -125,9 +125,8 @@ pb_integratedDensity <- function(cellMeters = 50, boundaries = c(5e3, 1e4), weig
     stop("The length of the boundaries and weights vectors must be equal")
   }
   
-  if (sum(weights)!= 1) {
-    stop("The weights should be a numeric vector that sums to one")
-  }
+  pb_check_weights_sum1(weights, tol = 1e-8, arg_name = "weights")
+  weights <- pb_normalize_weights(weights, "weights")
   
   probCircs <- list()
   

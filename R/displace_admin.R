@@ -28,10 +28,15 @@ pb_assign_admin <- function(point_sf,
                             poly_id = "ID_2",
                             newsuffix = "") {
   
-  if (!inherits(point_sf, "sf")) stop("point_sf must be an sf object.")
-  if (!inherits(poly_sf, "sf")) stop("poly_sf must be an sf object.")
-  if (!point_id %in% names(point_sf)) stop("point_id column not found in point_sf: ", point_id)
-  if (!poly_id %in% names(poly_sf)) stop("poly_id column not found in poly_sf: ", poly_id)
+  pb_check_sf(point_sf, "point_sf")
+  pb_check_geom_type(point_sf, "POINT", "point_sf")
+  pb_check_cols(point_sf, point_id, "point_sf")
+  pb_check_unique_id(sf::st_drop_geometry(point_sf), point_id, "point_sf")
+  
+  pb_check_sf(poly_sf, "poly_sf")
+  pb_check_cols(poly_sf, poly_id, "poly_sf")
+  pb_check_unique_id(sf::st_drop_geometry(poly_sf), poly_id, "poly_sf")
+  
   
   joined <- sf::st_join(
     point_sf,
@@ -94,13 +99,17 @@ pb_displace_protocol_dhs <- function(point_sf,
                                      poly_id = "ID_2",
                                      verbose = TRUE) {
   
-  if (!inherits(point_sf, "sf")) stop("point_sf must be an sf object.")
-  if (!inherits(poly_sf, "sf")) stop("poly_sf must be an sf object.")
-  if (!point_id %in% names(point_sf)) stop("point_id column not found in point_sf: ", point_id)
-  if (!poly_id %in% names(poly_sf)) stop("poly_id column not found in poly_sf: ", poly_id)
+  pb_check_sf(point_sf, "point_sf")
+  pb_check_geom_type(point_sf, "POINT", "point_sf")
+  pb_check_cols(point_sf, point_id, "point_sf")
+  pb_check_unique_id(sf::st_drop_geometry(point_sf), point_id, "point_sf")
+  pb_check_crs(point_sf, "point_sf")
+  pb_check_projected(point_sf, "point_sf")
   
-  crs_in <- sf::st_crs(point_sf)
-  if (is.null(crs_in)) stop("point_sf has no CRS; set it before displacement.")
+  pb_check_sf(poly_sf, "poly_sf")
+  pb_check_cols(poly_sf, poly_id, "poly_sf")
+  pb_check_unique_id(sf::st_drop_geometry(poly_sf), poly_id, "poly_sf")
+  
   
   # Original admin IDs
   original_admins <- pb_assign_admin(point_sf, poly_sf, point_id = point_id, poly_id = poly_id)

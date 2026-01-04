@@ -58,44 +58,37 @@ pb_radiusLimitJoin <- function(displaced.sf,
                                n.cores = 1) {
   
   
-  # ERRORS!
-  #   displaced.sf is the wrong class
-  if (!"sf" %in% class(displaced.sf)) {
-    stop("displaced.sf is not of class sf. It must be point features of class sf")
-  }
-  #   features2count.sf is the wrong class
-  if (!"sf" %in% class(features2count.sf)) {
-    stop("features2count.sf is not of class sf. It must be point features of class sf")
-  }
-  #   adminbBound is the wrong class
-  if (!is.null(adminBound) & !"sf" %in% class(adminBound)) {
-    stop("adminBound is not of class sf. It must be polygon features of class sf")
-  }
+  # --- validation (centralized) ---
+  pb_check_sf(displaced.sf, "displaced.sf")
+  pb_check_geom_type(displaced.sf, "POINT", "displaced.sf")
+  pb_check_crs(displaced.sf, "displaced.sf")
+  pb_check_projected(displaced.sf, "displaced.sf")
   
-  #   ensure that the adminBound sf object contains the unique ID
-  if (!adminID %in% names(adminBound)) {
-    stop(paste0(adminID, " is not found in the adminBound sf object."))
-  }
+  pb_check_sf(features2count.sf, "features2count.sf")
+  pb_check_crs(features2count.sf, "features2count.sf")
+  
+  pb_check_cols(displaced.sf, displaced.id, "displaced.sf")
+  pb_check_unique_id(sf::st_drop_geometry(displaced.sf), displaced.id, "displaced.sf")
   
   if (!is.null(adminBound)) {
-    if (sum(duplicated(adminBound[[adminID]])) > 0) {
-      stop("adminID must specify a uniquely valid ID for the adminbound object")
-    }
+    pb_check_sf(adminBound, "adminBound")
+    if (is.null(adminID)) stop("adminID must be provided when adminBound is provided.", call. = FALSE)
+    pb_check_cols(adminBound, adminID, "adminBound")
+    pb_check_unique_id(sf::st_drop_geometry(adminBound), adminID, "adminBound")
   }
   
-  #   ensure that the displaced.sf sf object contains the unique ID
-  if (!displaced.id %in% names(displaced.sf)) {
-    stop(paste0(displaced.id, " is not found in the displaced.sf sf object."))
+  pb_check_pos_scalar(limitDist, "limitDist")
+  pb_check_prob_vec(probCuts, "probCuts")
+  
+  # metrics must exist
+  if (!all(metrics %in% names(features2count.sf))) {
+    stop(
+      "One or more column names specified in metrics cannot be found in features2count.sf: ",
+      paste(setdiff(metrics, names(features2count.sf)), collapse = ", "),
+      call. = FALSE
+    )
   }
   
-  if (sum(duplicated(displaced.sf[[displaced.id]])) > 0) {
-    stop("displaced.id must specify a uniquely valid ID for the displaced.sf object")
-  }
-  
-  # ensure that metrics can be found in the 
-  if (!F %in% (metrics %in% names(features2count.sf))) {
-    stop("One or more column names specified in metrics cannot be found in the features2count.sf")
-  }
   
   # Assign unique id name to "DHSID" column
   displaced.sf$DHSID <- displaced.sf[[displaced.id]]
@@ -103,7 +96,9 @@ pb_radiusLimitJoin <- function(displaced.sf,
   features2count.sf$SPAID_use <- features2count.sf[[features2count.id]]
   
   # assign the adminID character value ot adminID variable name in dataframe
-  adminBound$adminID <- st_drop_geometry(adminBound)[[adminID]]
+  if (!is.null(adminBound)) {
+    adminBound$adminID <- sf::st_drop_geometry(adminBound)[[adminID]]
+  }
   
   
   if (n.cores > 1) {
@@ -412,45 +407,35 @@ pb_countFeatures <- function(displaced.sf,
                              n.cores = 1) {
   
   
-  # ERRORS!
-  #   displaced.sf is the wrong class
-  if (!"sf" %in% class(displaced.sf)) {
-    stop("displaced.sf is not of class sf. It must be point features of class sf")
-  }
-  #   features2count.sf is the wrong class
-  if (!"sf" %in% class(features2count.sf)) {
-    stop("features2count.sf is not of class sf. It must be point features of class sf")
-  }
-  #   adminbBound is the wrong class
-  if (!is.null(adminBound) & !"sf" %in% class(adminBound)) {
-    stop("adminBound is not of class sf. It must be polygon features of class sf")
-  }
+  # --- validation (centralized) ---
+  pb_check_sf(displaced.sf, "displaced.sf")
+  pb_check_geom_type(displaced.sf, "POINT", "displaced.sf")
+  pb_check_crs(displaced.sf, "displaced.sf")
+  pb_check_projected(displaced.sf, "displaced.sf")
   
-  #   ensure that the adminBound sf object contains the unique ID
-  if (!adminID %in% names(adminBound)) {
-    stop(paste0(adminID, " is not found in the adminBound sf object."))
-  }
+  pb_check_sf(features2count.sf, "features2count.sf")
+  pb_check_crs(features2count.sf, "features2count.sf")
+  
+  pb_check_cols(displaced.sf, displaced.id, "displaced.sf")
+  pb_check_unique_id(sf::st_drop_geometry(displaced.sf), displaced.id, "displaced.sf")
+  
+  pb_check_pos_scalar(radiusLength, "radiusLength")
   
   if (!is.null(adminBound)) {
-    if (sum(duplicated(adminBound[[adminID]])) > 0) {
-      stop("adminID must specify a uniquely valid ID for the adminbound object")
-    }
-  }
-  
-  #   ensure that the displaced.sf sf object contains the unique ID
-  if (!displaced.id %in% names(displaced.sf)) {
-    stop(paste0(displaced.id, " is not found in the displaced.sf sf object."))
-  }
-  
-  if (sum(duplicated(displaced.sf[[displaced.id]])) > 0) {
-    stop("displaced.id must specify a uniquely valid ID for the displaced.sf object")
+    pb_check_sf(adminBound, "adminBound")
+    if (is.null(adminID)) stop("adminID must be provided when adminBound is provided.", call. = FALSE)
+    pb_check_cols(adminBound, adminID, "adminBound")
+    pb_check_unique_id(sf::st_drop_geometry(adminBound), adminID, "adminBound")
   }
   
   
   # Assign unique id name to "DHSID" column
   displaced.sf$DHSID <- displaced.sf[[displaced.id]]
   # assign the adminID character value ot adminID variable name in dataframe
-  adminBound$adminID <- st_drop_geometry(adminBound)[[adminID]]
+  if (!is.null(adminBound)) {
+    adminBound$adminID <- sf::st_drop_geometry(adminBound)[[adminID]]
+  }
+  
   
   
   if (n.cores > 1) {
