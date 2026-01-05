@@ -10,4 +10,4 @@ Encoding: UTF-8
 LazyData: true
 SystemRequirements: R version >= 4.2.0
 Imports: raster, calculus, future, future.apply, iotools, sf, dplyr
-RoxygenNote: 7.2.1
+RoxygenNote: 7.3.2
