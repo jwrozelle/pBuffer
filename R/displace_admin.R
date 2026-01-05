@@ -110,6 +110,8 @@ pb_displace_protocol_dhs <- function(point_sf,
   pb_check_cols(poly_sf, poly_id, "poly_sf")
   pb_check_unique_id(sf::st_drop_geometry(poly_sf), poly_id, "poly_sf")
   
+  crs_in <- sf::st_crs(point_sf)
+  
   
   # Original admin IDs
   original_admins <- pb_assign_admin(point_sf, poly_sf, point_id = point_id, poly_id = poly_id)
@@ -123,6 +125,8 @@ pb_displace_protocol_dhs <- function(point_sf,
   i <- 0L
   mismatches <- nrow(dataset.sf)
   mismatched.sf <- NULL
+  
+
   
   while (mismatches > 0) {
     i <- i + 1L
