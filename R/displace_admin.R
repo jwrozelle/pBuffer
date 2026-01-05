@@ -97,7 +97,15 @@ pb_displace_protocol_dhs <- function(point_sf,
                                      poly_sf,
                                      point_id = "DHSID",
                                      poly_id = "ID_2",
-                                     verbose = TRUE) {
+                                     useCRS = NULL,
+                                     urban_col = "URBAN_RURA",
+                                     p_rural_hi = 0.01,
+                                     rural_max = 5000,
+                                     rural_max_hi = 10000,
+                                     urban_max = 2000,
+                                     uniform_area = FALSE,
+                                     verbose = TRUE
+                                     ) {
   
   pb_check_sf(point_sf, "point_sf")
   pb_check_geom_type(point_sf, "POINT", "point_sf")
@@ -143,10 +151,20 @@ pb_displace_protocol_dhs <- function(point_sf,
     }
     
     # Displace once (uses DHS-style rules)
-    displaced <- pb_displace_once_dhs(dataset.sf, useCRS = NULL)
+    displaced <- pb_displace_once_dhs(
+      dataset.sf, 
+      useCRS = NULL,
+      urban_col = urban_col,
+      p_rural_hi = p_rural_hi,
+      rural_max = rural_max,
+      rural_max_hi = rural_max_hi,
+      urban_max = urban_max,
+      uniform_area = FALSE
+      )
     
     if (verbose) message(sprintf("Displaced %d clusters.", nrow(displaced)))
     
+    # Check which administrative boundary it falls in now.
     displaced_admins <- pb_assign_admin(
       displaced,
       poly_sf,
@@ -199,6 +217,8 @@ pb_displace_protocol_dhs <- function(point_sf,
       message(sprintf("Completed displacement of %d clusters.", nrow(final_displacement)))
     }
   }
+  
+  rownames(final_displacement) <- paste0("disp_", sim1_view[[point_id]])
   
   final_displacement
 }
