@@ -9,6 +9,13 @@ pb_displace_protocol_dhs(
   poly_sf,
   point_id = "DHSID",
   poly_id = "ID_2",
+  useCRS = NULL,
+  urban_col = "URBAN_RURA",
+  p_rural_hi = 0.01,
+  rural_max = 5000,
+  rural_max_hi = 10000,
+  urban_max = 2000,
+  uniform_area = FALSE,
   verbose = TRUE
 )
 }

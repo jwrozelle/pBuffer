@@ -168,7 +168,7 @@ pb_polyJoin <- function(displaced.sf, polygons.sf, displaced.id = "DHSID", densi
         rowDHSID <- x[displaced.id]
         
         # extract an sf object for each row of the data frame
-        singleComm <- filter(displaced.sf, DHSID == rowDHSID)
+        singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
         crs2use <- raster::crs(singleComm)
         
         # If the administrative boundary is defined
@@ -188,13 +188,15 @@ pb_polyJoin <- function(displaced.sf, polygons.sf, displaced.id = "DHSID", densi
           
           
           # If the administrative boundary is specified, trim the probability buffer by the polygon layer
-          if(!is.null(adminBound)) {
-            # # Trim the weighted raster !!! 
-            # singleDens.raster <- trimProbBuff(singleDens.raster, adminBound = adminBound)
-            
-            # mask based on the administrative bounadries
-            singleDens.raster <- raster::mask(singleDens.raster, singleAdminBound.poly)
+          if (!is.null(adminBound)) {
+            singleDens.raster <- pb_trim_probRaster_to_point_admin(
+              probRaster = singleDens.raster,
+              point_sf   = singleComm,
+              adminBound = adminBound,
+              adminID    = "adminID"
+            )
           }
+          
           
           
           # turn these into a point object
@@ -227,7 +229,7 @@ pb_polyJoin <- function(displaced.sf, polygons.sf, displaced.id = "DHSID", densi
       rowDHSID <- x[displaced.id]
       
       # extract an sf object for each row of the data frame
-      singleComm <- filter(displaced.sf, DHSID == rowDHSID)
+      singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
       crs2use <- raster::crs(singleComm)
       
       # If the administrative boundary is defined
@@ -247,13 +249,15 @@ pb_polyJoin <- function(displaced.sf, polygons.sf, displaced.id = "DHSID", densi
         
         
         # If the administrative boundary is specified, trim the probability buffer by the polygon layer
-        if(!is.null(adminBound)) {
-          # Trim the weighted raster
-          singleDens.raster <- trimProbBuff(singleDens.raster, adminBound = adminBound)
-          
-          # mask based on the administrative bounadries
-          singleDens.raster <- raster::mask(singleDens.raster, singleAdminBound.poly)
+        if (!is.null(adminBound)) {
+          singleDens.raster <- pb_trim_probRaster_to_point_admin(
+            probRaster = singleDens.raster,
+            point_sf   = singleComm,
+            adminBound = adminBound,
+            adminID    = "adminID"
+          )
         }
+        
         
         
         # turn these into a point object
@@ -338,7 +342,7 @@ pb_weightedPolyJoin <- function(displaced.sf,
         rowDHSID <- x[displaced.id]
         
         # extract an sf object for each row of the data frame
-        singleComm <- filter(displaced.sf, DHSID == rowDHSID)
+        singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
         crs2use <- raster::crs(singleComm)
         
         if (st_coordinates(singleComm)[2] != 0) {
@@ -405,7 +409,7 @@ pb_weightedPolyJoin <- function(displaced.sf,
       rowDHSID <- x[displaced.id]
       
       # extract an sf object for each row of the data frame
-      singleComm <- filter(displaced.sf, DHSID == rowDHSID)
+      singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
       crs2use <- raster::crs(singleComm)
       
       if (st_coordinates(singleComm)[2] != 0) {

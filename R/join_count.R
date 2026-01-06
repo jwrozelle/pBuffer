@@ -36,7 +36,7 @@
 # polygons.sf
 # features2count.sf <- htSPAge_t2.sf
 # n.cores <- 18
-# densitybuffer <- pb_integratedDensity(boundaries = 5e3)
+# densityBuffer <- pb_integratedDensity(boundaries = 5e3)
 
 
 pb_radiusLimitJoin <- function(displaced.sf, 
@@ -77,6 +77,11 @@ pb_radiusLimitJoin <- function(displaced.sf,
     pb_check_unique_id(sf::st_drop_geometry(adminBound), adminID, "adminBound")
   }
   
+  if (is.null(densityBuffer)) {
+    stop("densityBuffer must be provided (e.g., pb_integratedDensity(...) or pb_mcDensity(...)).", call. = FALSE)
+  }
+  
+  
   pb_check_pos_scalar(limitDist, "limitDist")
   pb_check_prob_vec(probCuts, "probCuts")
   
@@ -114,31 +119,30 @@ pb_radiusLimitJoin <- function(displaced.sf,
         rowDHSID <- x[[displaced.id]]
         
         # extract an sf object for each row of the data frame
-        singleComm <- filter(displaced.sf, DHSID == rowDHSID)
+        singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
         crs2use <- raster::crs(singleComm)
         
         if (st_coordinates(singleComm)[2] != 0) {
           
           # rasterize the displacement buffer around the single community
-          singleDens.raster <- rasterizeDisplacement(
-            densitybuffer, 
-            initialCoords = st_coordinates(singleComm), 
-            inputCRS = crs2use
-          )
+          if (!is.null(adminBound)) {
+            singleDens.raster <- pb_trim_probRaster_to_point_admin(
+              probRaster = singleDens.raster,
+              point_sf   = singleComm,
+              adminBound = adminBound,
+              adminID    = "adminID"
+            )
+          }
           
           if (!is.null(adminBound)) {
-            # get the single admin boundary for a community
-            singleAdminBound <- suppressWarnings(sf::st_intersection(singleComm, adminBound))
-            singleAdminBound.poly <- dplyr::filter(adminBound, adminID == singleAdminBound$adminID[1])
-            
-            rm(singleAdminBound)
-            
-            # Trim the weighted raster
-            singleDens.raster <- trimProbBuff(singleDens.raster, adminBound = singleAdminBound.poly)
-            
-            rm(singleAdminBound.poly)
-            
+            singleDens.raster <- pb_trim_probRaster_to_point_admin(
+              probRaster = singleDens.raster,
+              point_sf   = singleComm,
+              adminBound = adminBound,
+              adminID    = "adminID"
+            )
           }
+          
           
           # turn these into a point object
           singleDens.sf <- st_rasterAsPoint(singleDens.raster)
@@ -167,7 +171,7 @@ pb_radiusLimitJoin <- function(displaced.sf,
           singleDens.df <- sf::st_drop_geometry(singleDens.sf)
           rm(singleDens.sf)
           
-          featureDistances.list <- lapply(features2count.sf[[features2count.id]], function(x) {
+          featureDistances.list <- lapply(features2count.sf$SPAID_use, function(x) {
             
             # extract only the estimated distance for a pb point and the weight
             singleFeatureDistance.df <- singleDens.df[c(x, "layer")]
@@ -238,31 +242,30 @@ pb_radiusLimitJoin <- function(displaced.sf,
       rowDHSID <- x[[displaced.id]]
       
       # extract an sf object for each row of the data frame
-      singleComm <- filter(displaced.sf, DHSID == rowDHSID)
+      singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
       crs2use <- raster::crs(singleComm)
       
       if (st_coordinates(singleComm)[2] != 0) {
         
         # rasterize the displacement buffer around the single community
-        singleDens.raster <- rasterizeDisplacement(
-          densitybuffer, 
-          initialCoords = st_coordinates(singleComm), 
-          inputCRS = crs2use
-        )
+        if (!is.null(adminBound)) {
+          singleDens.raster <- pb_trim_probRaster_to_point_admin(
+            probRaster = singleDens.raster,
+            point_sf   = singleComm,
+            adminBound = adminBound,
+            adminID    = "adminID"
+          )
+        }
         
         if (!is.null(adminBound)) {
-          # get the single admin boundary for a community
-          singleAdminBound <- suppressWarnings(sf::st_intersection(singleComm, adminBound))
-          singleAdminBound.poly <- dplyr::filter(adminBound, adminID == singleAdminBound$adminID[1])
-          
-          rm(singleAdminBound)
-          
-          # Trim the weighted raster
-          singleDens.raster <- trimProbBuff(singleDens.raster, adminBound = singleAdminBound.poly)
-          
-          rm(singleAdminBound.poly)
-          
+          singleDens.raster <- pb_trim_probRaster_to_point_admin(
+            probRaster = singleDens.raster,
+            point_sf   = singleComm,
+            adminBound = adminBound,
+            adminID    = "adminID"
+          )
         }
+        
         
         # turn these into a point object
         singleDens.sf <- st_rasterAsPoint(singleDens.raster)
@@ -291,7 +294,7 @@ pb_radiusLimitJoin <- function(displaced.sf,
         singleDens.df <- sf::st_drop_geometry(singleDens.sf)
         rm(singleDens.sf)
         
-        featureDistances.list <- lapply(features2count.sf[[features2count.id]], function(x) {
+        featureDistances.list <- lapply(features2count.sf$SPAID_use, function(x) {
           
           # extract only the estimated distance for a pb point and the weight
           singleFeatureDistance.df <- singleDens.df[c(x, "layer")]
@@ -394,7 +397,7 @@ pb_radiusLimitJoin <- function(displaced.sf,
 # polygons.sf
 # features2count.sf <- htSPAge_t2.sf
 # n.cores <- 18
-# densitybuffer <- pb_integratedDensity(boundaries = 5e3)
+# densityBuffer <- pb_integratedDensity(boundaries = 5e3)
 
 
 pb_countFeatures <- function(displaced.sf, 
@@ -420,6 +423,11 @@ pb_countFeatures <- function(displaced.sf,
   pb_check_unique_id(sf::st_drop_geometry(displaced.sf), displaced.id, "displaced.sf")
   
   pb_check_pos_scalar(radiusLength, "radiusLength")
+  
+  if (is.null(densityBuffer)) {
+    stop("densityBuffer must be provided (e.g., pb_integratedDensity(...) or pb_mcDensity(...)).", call. = FALSE)
+  }
+  
   
   if (!is.null(adminBound)) {
     pb_check_sf(adminBound, "adminBound")
@@ -451,17 +459,20 @@ pb_countFeatures <- function(displaced.sf,
         rowDHSID <- x[[displaced.id]]
         
         # extract an sf object for each row of the data frame
-        singleComm <- filter(displaced.sf, DHSID == rowDHSID)
+        singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
         crs2use <- raster::crs(singleComm)
         
         if (st_coordinates(singleComm)[2] != 0) {
           
           # rasterize the displacement buffer around the single community
-          singleDens.raster <- rasterizeDisplacement(
-            densitybuffer, 
-            initialCoords = st_coordinates(singleComm), 
-            inputCRS = crs2use
-          )
+          if (!is.null(adminBound)) {
+            singleDens.raster <- pb_trim_probRaster_to_point_admin(
+              probRaster = singleDens.raster,
+              point_sf   = singleComm,
+              adminBound = adminBound,
+              adminID    = "adminID"
+            )
+          }
           
           if (!is.null(adminBound)) {
             # get the single admin boundary for a community
@@ -523,17 +534,20 @@ pb_countFeatures <- function(displaced.sf,
       rowDHSID <- x[[displaced.id]]
       
       # extract an sf object for each row of the data frame
-      singleComm <- filter(displaced.sf, DHSID == rowDHSID)
+      singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
       crs2use <- raster::crs(singleComm)
       
       if (st_coordinates(singleComm)[2] != 0) {
         
         # rasterize the displacement buffer around the single community
-        singleDens.raster <- rasterizeDisplacement(
-          densitybuffer, 
-          initialCoords = st_coordinates(singleComm), 
-          inputCRS = crs2use
-        )
+        if (!is.null(adminBound)) {
+          singleDens.raster <- pb_trim_probRaster_to_point_admin(
+            probRaster = singleDens.raster,
+            point_sf   = singleComm,
+            adminBound = adminBound,
+            adminID    = "adminID"
+          )
+        }
         
         if (!is.null(adminBound)) {
           # get the single admin boundary for a community
