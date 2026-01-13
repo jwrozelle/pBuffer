@@ -1,28 +1,41 @@
+# ======================================================================
+# prob_points_mc.R
+#
+# Purpose:
+#   Monte Carlo utilities for DHS-style positional uncertainty:
+#     - pb_cloud_dhs_mc(): simulate a cloud of candidate locations around a point
+#     - pb_cloud_to_grid(): bin cloud to a probability raster (sums to 1)
+#     - pb_grid_to_points(): convert probability raster to weighted points
+#
+# Notes:
+#   These are useful when you want an MC-derived approximation to the density buffer,
+#   or when you want to empirically approximate complex trimming constraints.
+# ======================================================================
+
 #' Generate a Monte Carlo displacement cloud under DHS-style rules
 #'
-#' Creates a cloud of candidate locations for a single DHS cluster by drawing
-#' many displacement realizations consistent with DHS public-use rules:
-#' urban: max 2 km; rural: max 5 km with a small fraction (rounded down) allowed up to 10 km.
+#' @description
+#' Creates a cloud of candidate locations for a single cluster by drawing many
+#' displacement realizations:
+#' \itemize{
+#'   \item urban: 0–2km
+#'   \item rural: 99% 0–5km, 1% 0–10km (configurable)
+#' }
 #'
-#' The output is an sf POINT object that can be fed into pBuffer join functions
-#' directly, or binned into a grid via `pb_cloud_to_grid()`.
+#' This cloud can be binned to a grid using \code{pb_cloud_to_grid()}.
 #'
-#' @param point_sf A single-row `sf` POINT object (one cluster). Must include `urban_col`.
-#' @param n_draws Number of Monte Carlo draws (default 200000).
-#' @param urban_col Name of urban/rural column (default `"URBAN_RURA"`, expecting `"U"`/`"R"`).
-#' @param p_rural_hi Fraction of rural draws with higher max displacement (default 0.01).
-#'   DHS protocol specifies 1% of rural clusters, rounded down; implemented as `floor(n_draws*p_rural_hi)`.
-#'   Set to 0 to ignore the rare 10 km tail.
-#' @param rural_max Rural max displacement in meters (default 5000).
-#' @param rural_max_hi Rare rural max displacement in meters (default 10000).
-#' @param urban_max Urban max displacement in meters (default 2000).
-#' @param uniform_area If FALSE (default), distances are uniform in radius. If TRUE, uniform over area.
-#' @param weightsCol Name of the weight column in the output (default `"layer"`).
-#' @param keep_offsets If TRUE, includes `dx` and `dy` columns in output (default TRUE).
+#' @param point_sf Single-row \code{sf} POINT object.
+#' @param n_draws Number of Monte Carlo draws.
+#' @param urban_col Name of urban/rural column (expects "U"/"R").
+#' @param p_rural_hi Tail probability for rural 10km draws.
+#' @param rural_max Rural max displacement (m).
+#' @param rural_max_hi Rural tail max displacement (m).
+#' @param urban_max Urban max displacement (m).
+#' @param uniform_area If TRUE, draws uniform in area: r = sqrt(U)*R. If FALSE, uniform in radius: r = U*R.
+#' @param weightsCol Output weight column name (default "layer").
+#' @param keep_offsets If TRUE, keep dx/dy columns for debugging.
 #'
-#' @return An `sf` POINT object with `n_draws` rows. Contains a weight column (`weightsCol`)
-#'   summing to 1 and geometry representing the displaced locations.
-#'
+#' @return \code{sf} POINT with \code{n_draws} rows and weights summing to 1.
 #' @export
 pb_cloud_dhs_mc <- function(point_sf,
                             n_draws = 200000,
@@ -35,184 +48,165 @@ pb_cloud_dhs_mc <- function(point_sf,
                             weightsCol = "layer",
                             keep_offsets = TRUE) {
   
-  if (!inherits(point_sf, "sf")) stop("point_sf must be an sf object.")
-  if (nrow(point_sf) != 1) stop("point_sf must have exactly 1 row.")
-  if (!inherits(sf::st_geometry(point_sf), "sfc_POINT")) stop("point_sf must have POINT geometry.")
-  if (!urban_col %in% names(point_sf)) stop("Missing urban/rural column: ", urban_col)
+  if (!inherits(point_sf, "sf")) stop("point_sf must be an sf object.", call. = FALSE)
+  if (nrow(point_sf) != 1) stop("point_sf must have exactly 1 row.", call. = FALSE)
+  if (!inherits(sf::st_geometry(point_sf), "sfc_POINT")) stop("point_sf must have POINT geometry.", call. = FALSE)
+  if (!urban_col %in% names(point_sf)) stop("Missing urban/rural column: ", urban_col, call. = FALSE)
   
   crs_in <- sf::st_crs(point_sf)
-  if (is.null(crs_in)) stop("point_sf has no CRS; set it before using this function.")
+  if (is.null(crs_in)) stop("point_sf has no CRS; set it before use.", call. = FALSE)
+  
   xy <- sf::st_coordinates(point_sf)[1, ]
-  if (anyNA(xy)) stop("Could not read coordinates from point_sf.")
+  if (anyNA(xy)) stop("Could not read coordinates from point_sf.", call. = FALSE)
   
-  ur <- point_sf[[urban_col]]
-  if (!ur %in% c("U", "R")) stop("urban_col must contain 'U' or 'R' for the provided point.")
+  ur <- as.character(sf::st_drop_geometry(point_sf)[[urban_col]][1])
+  if (!ur %in% c("U", "R")) stop("urban_col must be 'U' or 'R' for the provided point.", call. = FALSE)
   
-  n <- as.integer(n_draws)
-  if (n < 1) stop("n_draws must be >= 1.")
-  
-  # Draw angles
-  theta <- stats::runif(n, 0, 2 * pi)
-  
-  # Determine max radius per draw
+  # Determine max radius per draw under DHS mixture
   if (ur == "U") {
-    max_r <- rep(urban_max, n)
+    max_m <- rep(urban_max, n_draws)
   } else {
-    max_r <- rep(rural_max, n)
-    
-    # DHS: 1% of rural clusters, rounded down (generalized via p_rural_hi)
-    if (is.finite(p_rural_hi) && p_rural_hi > 0 && rural_max_hi > rural_max) {
-      k <- as.integer(floor(n * p_rural_hi))
-      if (k >= 1L) {
-        idx <- sample.int(n, size = k, replace = FALSE)
-        max_r[idx] <- rural_max_hi
-      }
-    }
+    # Implement tail as a fraction of draws
+    n_hi <- floor(n_draws * p_rural_hi)
+    max_m <- c(rep(rural_max_hi, n_hi), rep(rural_max, n_draws - n_hi))
+    max_m <- sample(max_m)  # shuffle
   }
   
-  u <- stats::runif(n, 0, 1)
-  r <- if (uniform_area) sqrt(u) * max_r else u * max_r
+  theta <- stats::runif(n_draws, 0, 2 * pi)
+  u     <- stats::runif(n_draws, 0, 1)
+  r     <- if (isTRUE(uniform_area)) sqrt(u) * max_m else u * max_m
   
   dx <- cos(theta) * r
   dy <- sin(theta) * r
   
-  # Build sf points (absolute coords)
-  df <- data.frame(
-    draw_id = seq_len(n),
-    dx = dx,
-    dy = dy,
-    x = xy[1] + dx,
-    y = xy[2] + dy
+  out <- data.frame(
+    x = xy["X"] + dx,
+    y = xy["Y"] + dy,
+    stringsAsFactors = FALSE
   )
   
-  # Equal weights
-  df[[weightsCol]] <- rep(1 / n, n)
+  # Equal-weight cloud; later binning turns this into probability mass
+  out[[weightsCol]] <- rep(1 / n_draws, n_draws)
   
-  out <- sf::st_as_sf(df, coords = c("x", "y"), crs = crs_in)
-  
-  if (!keep_offsets) {
-    out$dx <- NULL
-    out$dy <- NULL
+  if (isTRUE(keep_offsets)) {
+    out$dx <- dx
+    out$dy <- dy
+    out$max_m <- max_m
   }
   
-  out
+  sf::st_as_sf(out, coords = c("x", "y"), crs = crs_in)
 }
 
-
-#' Bin a displacement cloud into a probability grid (raster)
+#' Bin a Monte Carlo cloud to a probability raster
 #'
-#' Converts a set of candidate point locations (an sf POINT cloud) into a discrete
-#' probability surface on a regular grid. By default this uses simple cell binning
-#' (counts) and then normalizes to sum to 1. If a weights column is provided, cell
-#' values are the sum of weights.
+#' @description
+#' Converts a cloud of candidate points (with optional weights) into a RasterLayer
+#' where cell values represent probability mass and sum to 1 (after optional trimming).
 #'
-#' Optionally trims/masks the grid to an administrative boundary and renormalizes
-#' via `trimProbBuff()`.
+#' @param cloud_sf \code{sf} POINT cloud.
+#' @param cell_m Raster resolution in meters.
+#' @param weightsCol Weight column name in \code{cloud_sf}. If missing, points treated as equal weight.
+#' @param adminBound Optional \code{sf} polygon to mask/trim the probability raster.
+#' @param adminID Admin ID column in adminBound.
 #'
-#' @param cloud_sf An `sf` POINT object (e.g., output of `pb_cloud_dhs_mc()`).
-#' @param cell_m Grid resolution in meters (default 50).
-#' @param weightsCol Name of the weight column in `cloud_sf` (default `"layer"`). If missing,
-#'   points are treated as equal weight.
-#' @param extent_m Optional numeric scalar giving half-width of the square extent centered on
-#'   `center_xy`. If NULL, extent is derived from the cloud bounding box.
-#' @param center_xy Optional numeric length-2 vector c(x,y) for grid centering. If NULL,
-#'   uses the centroid of the cloud’s bbox.
-#' @param adminBound Optional `sf` polygon used to trim/mask the grid (default NULL).
-#' @param drop_zeros If TRUE (default), zeros remain zeros in raster; conversion to points
-#'   can drop them later.
-#'
-#' @return A `raster::RasterLayer` whose cell values sum to 1.
-#'
+#' @return \code{raster::RasterLayer} whose cell values sum to 1.
 #' @export
 pb_cloud_to_grid <- function(cloud_sf,
                              cell_m = 50,
                              weightsCol = "layer",
-                             extent_m = NULL,
-                             center_xy = NULL,
                              adminBound = NULL,
-                             drop_zeros = TRUE) {
+                             adminID = "ID_2") {
   
-  if (!inherits(cloud_sf, "sf")) stop("cloud_sf must be an sf object.")
-  if (!inherits(sf::st_geometry(cloud_sf), "sfc_POINT")) stop("cloud_sf must have POINT geometry.")
-  if (nrow(cloud_sf) < 1) stop("cloud_sf has zero rows.")
+  if (!inherits(cloud_sf, "sf")) stop("cloud_sf must be an sf object.", call. = FALSE)
+  if (!inherits(sf::st_geometry(cloud_sf), "sfc_POINT")) stop("cloud_sf must have POINT geometry.", call. = FALSE)
   
   crs_in <- sf::st_crs(cloud_sf)
-  if (is.null(crs_in)) stop("cloud_sf has no CRS; set it before using this function.")
+  if (is.null(crs_in)) stop("cloud_sf has no CRS.", call. = FALSE)
   
-  # Determine grid center
+  w <- NULL
+  if (weightsCol %in% names(cloud_sf)) {
+    w <- sf::st_drop_geometry(cloud_sf)[[weightsCol]]
+  } else {
+    w <- rep(1, nrow(cloud_sf))
+  }
+  w[is.na(w)] <- 0
+  
+  # Build template raster over cloud extent
   bb <- sf::st_bbox(cloud_sf)
-  if (is.null(center_xy)) {
-    center_xy <- c((bb["xmin"] + bb["xmax"]) / 2, (bb["ymin"] + bb["ymax"]) / 2)
-  }
-  
-  # Determine extent
-  if (is.null(extent_m)) {
-    extent_m <- max(bb["xmax"] - bb["xmin"], bb["ymax"] - bb["ymin"]) / 2
-  }
-  
-  r0 <- raster::raster(
-    xmn = center_xy[1] - extent_m, xmx = center_xy[1] + extent_m,
-    ymn = center_xy[2] - extent_m, ymx = center_xy[2] + extent_m,
+  r <- raster::raster(
+    raster::extent(bb["xmin"], bb["xmax"], bb["ymin"], bb["ymax"]),
     res = cell_m,
-    crs = crs_in
+    crs = crs_in$wkt
   )
   
-  # Rasterize: sum weights if present; else count points
-  if (weightsCol %in% names(cloud_sf)) {
-    sp_pts <- as(cloud_sf, "Spatial")
-    rr <- raster::rasterize(sp_pts, r0, field = weightsCol, fun = "sum", background = 0)
-  } else {
-    sp_pts <- as(cloud_sf, "Spatial")
-    rr <- raster::rasterize(sp_pts, r0, field = 1, fun = "count", background = 0)
-  }
+  # Rasterize weighted points to probability mass per cell
+  sp_pts <- methods::as(cloud_sf, "Spatial")
+  r <- raster::rasterize(sp_pts, r, field = w, fun = sum, background = 0)
   
-  # Optional trim + renormalize
+  # Optional admin trimming
   if (!is.null(adminBound)) {
-    if (!inherits(adminBound, "sf")) stop("adminBound must be an sf object if provided.")
-    rr <- trimProbBuff(probRaster = rr, adminBound = adminBound)
-  } else {
-    s <- sum(rr[], na.rm = TRUE)
-    if (is.na(s) || s == 0) stop("Grid sums to 0/NA; cannot normalize.")
-    rr[] <- rr[] / s
+    if (!inherits(adminBound, "sf")) stop("adminBound must be sf.", call. = FALSE)
+    if (!adminID %in% names(adminBound)) stop("adminBound missing adminID.", call. = FALSE)
+    if (sf::st_crs(adminBound) != sf::st_crs(cloud_sf)) {
+      stop("adminBound and cloud_sf must share CRS.", call. = FALSE)
+    }
+    
+    r <- suppressWarnings(raster::mask(r, methods::as(adminBound, "Spatial")))
   }
   
-  rr
+  # Renormalize to sum to 1 over non-NA
+  vals <- raster::values(r)
+  ok <- !is.na(vals)
+  s <- sum(vals[ok])
+  if (is.finite(s) && s > 0) {
+    vals[ok] <- vals[ok] / s
+    raster::values(r) <- vals
+  } else {
+    raster::values(r) <- NA_real_
+  }
+  
+  r
 }
 
-
-#' Convert a probability grid (raster) to weighted points
+#' Convert a probability raster to weighted points
 #'
-#' Converts a probability raster (e.g., output of `pb_cloud_to_grid()`) into an `sf`
-#' POINT layer located at cell centers, with a weight column containing the raster
-#' cell values.
+#' @description
+#' Converts a RasterLayer of probability mass into an sf point set located at cell centers,
+#' with a weight column equal to the cell probability.
 #'
-#' @param prob_raster A `raster::RasterLayer` whose values represent probabilities.
-#' @param weightsCol Name of output weight column (default `"layer"`).
-#' @param drop_zeros If TRUE (default), drops cells with zero/NA probability.
+#' @param prob_raster RasterLayer with probability mass per cell (sums to 1).
+#' @param weightsCol Output weight column name (default "layer").
+#' @param drop_zeros If TRUE, drops zero and NA cells.
 #'
-#' @return An `sf` POINT object with weight column `weightsCol` summing to 1.
+#' @return \code{sf} POINT with one row per nonzero cell.
 #' @export
 pb_grid_to_points <- function(prob_raster,
                               weightsCol = "layer",
                               drop_zeros = TRUE) {
   
-  if (!inherits(prob_raster, "RasterLayer")) stop("prob_raster must be a raster::RasterLayer.")
+  if (!inherits(prob_raster, "RasterLayer")) stop("prob_raster must be a RasterLayer.", call. = FALSE)
   
-  df <- raster::rasterToPoints(prob_raster) |> as.data.frame()
-  val_col <- setdiff(names(df), c("x", "y"))
-  if (length(val_col) != 1) stop("Unexpected rasterToPoints output (expected one value column).")
+  pts <- raster::rasterToPoints(prob_raster, spatial = TRUE)
+  if (!inherits(pts, "SpatialPointsDataFrame")) stop("Unexpected rasterToPoints output.", call. = FALSE)
   
-  if (drop_zeros) {
-    df <- df[!is.na(df[[val_col]]) & df[[val_col]] > 0, , drop = FALSE]
+  pts <- sf::st_as_sf(pts)
+  if (ncol(sf::st_drop_geometry(pts)) != 1) {
+    stop("Probability raster must have exactly one value layer.", call. = FALSE)
   }
   
-  pts <- sf::st_as_sf(df, coords = c("x", "y"), crs = sf::st_crs(prob_raster))
-  names(pts)[names(pts) == val_col] <- weightsCol
+  names(pts)[1] <- weightsCol
   
-  # Renormalize (important if dropped zeros)
-  s <- sum(pts[[weightsCol]], na.rm = TRUE)
-  if (is.na(s) || s == 0) stop("Point weights sum to 0/NA after conversion.")
-  pts[[weightsCol]] <- pts[[weightsCol]] / s
+  if (isTRUE(drop_zeros)) {
+    v <- sf::st_drop_geometry(pts)[[weightsCol]]
+    pts <- pts[!is.na(v) & v > 0, ]
+  }
+  
+  # Ensure weights sum to 1 (numerical safety)
+  v <- sf::st_drop_geometry(pts)[[weightsCol]]
+  s <- sum(v, na.rm = TRUE)
+  if (is.finite(s) && s > 0) {
+    pts[[weightsCol]] <- v / s
+  }
   
   pts
 }

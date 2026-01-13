@@ -1,5 +1,9 @@
 # ---- internal validation helpers (not exported) ----
 
+#' @keywords internal
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+
 # Check object is sf
 pb_check_sf <- function(x, arg_name = "object") {
   if (!inherits(x, "sf")) {
