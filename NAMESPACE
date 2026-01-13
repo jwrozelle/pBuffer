@@ -2,6 +2,7 @@
 
 export(ml_polygon)
 export(pb_Density)
+export(pb_densityBuffer)
 export(pb_assign_admin)
 export(pb_cloud_dhs_mc)
 export(pb_cloud_to_grid)
