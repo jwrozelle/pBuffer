@@ -90,8 +90,10 @@ pb_build_kernel_integral <- function(R, cell_m, kernel = c("uniform_radius", "un
 }
 
 #' @keywords internal
-pb_build_kernel_mc <- function(R, cell_m, kernel = c("uniform_radius", "uniform_area"), n_draws = 200000) {
+pb_build_kernel_mc <- function(R, cell_m, kernel = c("uniform_radius", "uniform_area"),
+                               n_draws = 200000, seed = NULL) {
   kernel <- match.arg(kernel)
+  if (!is.null(seed)) set.seed(seed)
   
   # Draw offsets under chosen kernel
   theta <- stats::runif(n_draws, 0, 2*pi)
