@@ -1,494 +1,248 @@
-#' @name ml_polygon
-#' @rdname ml_polygon
-#' @title  ml_polygon
-#'
-#' @description  Determines the maximum likely polygon for a given point
-#' 
-#' @returns returns a dataframe with one row containing the data from most likely health facility joined, and its estimated probability.
-#' 
-#' @details Replaces the weightedClose function
-#'
-#'
-#' @param bufferPoints.sf Buffer points of a given displaced location containing weights
-#' @param polygons.sf Polygons to join the displaced points to. For now, the function assumes there is a column with unique ID for each polygon called "SPAID"
-#' @param polygons.id Name of column of polygons.id sf object that contains a unique ID, default is "SPAID".
-#' @param weightsCol Name of the column in the bufferPoints.sf object that contains the weights to use, defaults to "layer".
-#'
-#' @author J.W. Rozelle
-#'
-#'
-#' @export ml_polygon
-#' @examples
-#'
-#' # coming soon!
-#' 
-#'
+# ======================================================================
+# join_polygon.R
+#
+# Probability-aware polygon joins:
+#   - pb_polyProbsJoin(): for each displaced point, return ALL polygons with
+#     their probability mass under the uncertainty kernel.
+#   - pb_polyJoin(): return ONLY the most likely polygon (MAP) per displaced point.
+#
+# Interpretation:
+#   For point i, candidate locations k have weights w_k (sum to 1). We assign
+#   each candidate to a polygon, then aggregate weights by polygon id:
+#     P(poly=j | i) = sum_{k in j} w_k
+# ======================================================================
 
-
-
-ml_polygon <- function(bufferPoints.sf, polygons.sf, polygons.id = "SPAID", weightsCol = "layer") {
+#' Polygon membership probabilities under positional uncertainty
+#'
+#' @description
+#' Returns a discrete distribution of polygon membership probabilities for each
+#' displaced point. Probability mass is computed by applying a `densityBuffer`
+#' at each displaced point, assigning each candidate location to a polygon, and
+#' summing candidate weights by polygon ID.
+#'
+#' If `densityBuffer` is NULL, this performs a conventional point-in-polygon join
+#' and returns probability 1 for the polygon containing the point (or no rows if
+#' none).
+#'
+#' @param displaced.sf `sf` POINT object of displaced locations (one per ID).
+#' @param polygons.sf `sf` POLYGON/MULTIPOLYGON object to join against.
+#' @param displaced.id Unique ID column in `displaced.sf`.
+#' @param polygons.id Unique ID column in `polygons.sf`.
+#' @param densityBuffer Optional pb_densityBuffer object (from `pb_densityBuffer()`).
+#' @param adminBound Optional admin polygons used to trim kernels (passed to
+#'   `pb_apply_densityBuffer()`).
+#' @param adminID Polygon ID column in `adminBound` (required if `adminBound` provided).
+#' @param drop_zero If TRUE, drop polygons with probability 0 (default TRUE).
+#'
+#' @return A data.frame with columns:
+#'   - displaced.id
+#'   - polygons.id
+#'   - p_hat (probability mass; sums to ~1 per displaced.id if candidates cover space)
+#' @export
+pb_polyProbsJoin <- function(displaced.sf,
+                             polygons.sf,
+                             displaced.id = "DHSID",
+                             polygons.id = "SPAID",
+                             densityBuffer = NULL,
+                             adminBound = NULL,
+                             adminID = NULL,
+                             drop_zero = TRUE) {
   
-  #----validation-------
-  pb_check_sf(bufferPoints.sf, "bufferPoints.sf")
+  # ---- validation ----
+  pb_check_sf(displaced.sf, "displaced.sf")
+  pb_check_geom_type(displaced.sf, "POINT", "displaced.sf")
+  pb_check_cols(displaced.sf, displaced.id, "displaced.sf")
+  pb_check_unique_id(sf::st_drop_geometry(displaced.sf), displaced.id, "displaced.sf")
+  
   pb_check_sf(polygons.sf, "polygons.sf")
-  
   pb_check_cols(polygons.sf, polygons.id, "polygons.sf")
-  pb_check_cols(bufferPoints.sf, weightsCol, "bufferPoints.sf")
+  pb_check_unique_id(sf::st_drop_geometry(polygons.sf), polygons.id, "polygons.sf")
   
+  if (sf::st_crs(displaced.sf) != sf::st_crs(polygons.sf)) {
+    stop("CRS mismatch: displaced.sf and polygons.sf must have the same CRS.", call. = FALSE)
+  }
   
-  # Standardize column names BEFORE intersection so they propagate into the intersection result
-  polygons.sf$SPAID <- polygons.sf[[polygons.id]]
-  bufferPoints.sf$layer <- bufferPoints.sf[[weightsCol]]
+  ids <- displaced.sf[[displaced.id]]
   
-  intersection <- st_intersection(
-    polygons.sf[, c("SPAID")],
-    bufferPoints.sf[, c("layer")]
-  )
-  
-  # normalize intersection weights (not bufferPoints.sf)
-  intersection$layer <- pb_normalize_weights(intersection$layer, "intersection weights")
-  
-  # non_missing <- length(intersection$SPAID)
-  
-  # group all intersections by the number of possible polygons
-  int_result <- intersection %>% 
-    st_drop_geometry() %>% 
-    group_by(SPAID) %>% 
-    summarize(weight = sum(layer, na.rm = TRUE))
-  
-  # merge the grouped possible polygons and probabilities with the data in the polygons. Keep only the possible polygons
-  includedScores <- merge(
-    int_result,
-    st_drop_geometry(polygons.sf[c("SPAID")]),
-    all.x = TRUE, all.y = FALSE,
-    by = "SPAID"
-  )
-  
-  # Filter to the maximum likely polygon
-  mostLikelyHF.df <- filter(int_result, weight == max(weight, na.rm = T)) |> as.data.frame()
-  
-  # throw a warning if linked to more than one health facility
-  if (nrow(mostLikelyHF.df) > 1) {
-    warning(paste0(
-      "Warning: linked to more than one polygon. The first of ",
-      nrow(mostLikelyHF.df),
-      " tied polygons is used."
+  # ---- conventional path (no densityBuffer) ----
+  if (is.null(densityBuffer)) {
+    
+    joined <- suppressWarnings(sf::st_join(
+      displaced.sf[, displaced.id, drop = FALSE],
+      polygons.sf[, polygons.id, drop = FALSE],
+      join = sf::st_within,
+      left = FALSE
     ))
-    mostLikelyHF.df <- mostLikelyHF.df[1, , drop = FALSE]
-  }
-  
-  
-  
-  return(mostLikelyHF.df)
-}
-
-
-#' @name pb_polyJoin
-#' @rdname pb_polyJoin
-#' @title  pb_polyJoin
-#'
-#' @description  Estimates th
-#' 
-#' @returns Returns a dataframe of length nrow(displaced.sf), with a DHSID column containing the unique ID of displaced.sf and SPAID containing the unique ID of the most likely polygon that a given point falls in.
-#'
-#'
-#' @param displaced.sf Displaced coordinates in an sf object type.
-#' @param polygons.sf Polygons to join the displaced points to. For now, the function assumes there is a column with unique ID for each polygon called "SPAID"
-#' @param displaced.id The name of the column that contains a unique ID for the displaced communities.
-#' @param densityBuffer A density buffer list object created with the pb_integratedDens or pb_Density functions.
-#' @param adminBound (Optional) the administrative boundary that circumscribes the displacement
-#' @param adminID The unique ID for the adminBound featurs, defaults to "ID_2".
-#' @param n.cores This allows for parallelization using the futures package. This can be slightly unstable, but normally functions well and dramatically speeds compute time when it does. n.cores specifies the number of cores to use. The default is 1, and does not parallelize.
-#'
-#' @author J.W. Rozelle
-#'
-#'
-#' @export pb_Density
-#' @examples
-#'
-#' # coming soon!
-#' 
-#'
-
-
-
-
-
-pb_polyJoin <- function(displaced.sf, polygons.sf, displaced.id = "DHSID", densityBuffer = NULL, adminBound = haiti_adm2, adminID = "ID_2", n.cores = 1) {
-  
-  # Check to make sure that objects which should be in sf format are in sf format
-  #   displaced.sf
-  if (!"sf" %in% class(displaced.sf)) {
-    stop("The specified displaced.sf is not in sf format. It must be in sf format for this function to work.")
-  }
-  #   polygons.sf
-  if (!"sf" %in% class(polygons.sf)) {
-    stop("The specified polygons.sf is not in sf format. It must be in sf format for this function to work.")
-  }
-  #   adminBound
-  if (!"sf" %in% class(displaced.sf)) {
-    stop("The specified adminBound is not in sf format. It must be in sf format for this function to work.")
-  }
-  
-  
-  # ensure that the adminBound sf object contains the unique ID
-  if (!adminID %in% names(adminBound)) {
-    stop(paste0(adminID, " is not found in the adminBound sf object."))
-  }
-  
-  if (!is.null(adminBound)) {
-    if (sum(duplicated(adminBound[[adminID]])) > 0) {
-      stop("adminID must specify a uniquely valid ID for the adminbound object")
+    
+    if (nrow(joined) == 0) {
+      out <- data.frame(
+        displaced_id = character(0),
+        polygon_id   = character(0),
+        p_hat        = numeric(0)
+      )
+      names(out) <- c(displaced.id, polygons.id, "p_hat")
+      return(out)
     }
-  }
-  
-  # ensure that the displaced.sf sf object contains the unique ID
-  if (!displaced.id %in% names(displaced.sf)) {
-    stop(paste0(displaced.id, " is not found in the displaced.sf sf object."))
-  }
-  
-  if (sum(duplicated(displaced.sf[[displaced.id]])) > 0) {
-    stop("displaced.id must specify a uniquely valid ID for the displaced.sf object")
-  }
-  
-  # rename the adminboundary unique ID to adminID
-  adminBound$adminID <- adminBound[[adminID]]
-  
-  
-  if (n.cores > 1) {
     
-    tryCatch({
-      
-      # set up the workers
-      cl <- parallel::makeCluster(n.cores)
-      plan(cluster, workers = cl)
-      
-      closestHFs <- future_apply(st_drop_geometry(displaced.sf), 1, function(x) {
-        
-        rowDHSID <- x[displaced.id]
-        
-        # extract an sf object for each row of the data frame
-        singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
-        crs2use <- raster::crs(singleComm)
-        
-        # If the administrative boundary is defined
-        if (!is.null(adminBound)) {
-          # get the single admin boundary for a community
-          singleAdminBound <- suppressWarnings(sf::st_intersection(singleComm, adminBound))
-          singleAdminBound.poly <- dplyr::filter(adminBound, adminID == singleAdminBound$adminID[1])
-        }
-        if (st_coordinates(singleComm)[2] != 0) {
-          
-          # rasterize the displacement buffer around the single community
-          singleDens.raster <- rasterizeDisplacement(
-            densityBuffer, 
-            initialCoords = st_coordinates(singleComm), 
-            inputCRS = crs2use
-          )
-          
-          
-          # If the administrative boundary is specified, trim the probability buffer by the polygon layer
-          if (!is.null(adminBound)) {
-            singleDens.raster <- pb_trim_probRaster_to_point_admin(
-              probRaster = singleDens.raster,
-              point_sf   = singleComm,
-              adminBound = adminBound,
-              adminID    = "adminID"
-            )
-          }
-          
-          
-          
-          # turn these into a point object
-          singleDens.sf <- st_rasterAsPoint(singleDens.raster)
-          rm(singleDens.raster)
-          
-          # Get the most probable nearby health facility
-          probableHF <- ml_polygon(singleDens.sf, polygons.sf)
-          
-          # put dhsid, spaid, and weight into a merged, single-row data frame
-          results.df <- data.frame(DHSID = rowDHSID)
-          results.df <- cbind(results.df, probableHF)
-        } else {
-          results.df <- NA
-        }
-        
-        return(results.df)
-        
-      })
-    },
+    out <- sf::st_drop_geometry(joined)
     
-    # always stop the cluster, even if future_apply fails
-    finally = {parallel::stopCluster(cl)}
+    # Handle multi-hit (point on boundary or overlapping polygons):
+    # keep first, but warn because conventional join can't disambiguate.
+    dup <- out[[displaced.id]][duplicated(out[[displaced.id]])]
+    if (length(dup) > 0) {
+      warning("Some points intersect multiple polygons; keeping the first match per point.", call. = FALSE)
+      out <- out[!duplicated(out[[displaced.id]]), , drop = FALSE]
+    }
+    
+    out$p_hat <- 1
+    return(as.data.frame(out))
+  }
+  
+  # ---- probability-aware path ----
+  res_list <- lapply(ids, function(id_i) {
+    
+    pt <- displaced.sf[displaced.sf[[displaced.id]] == id_i, , drop = FALSE]
+    
+    cand <- pb_apply_densityBuffer(
+      displaced.sf = pt,
+      densityBuffer = densityBuffer,
+      adminBound = adminBound,
+      adminID = adminID
     )
     
-  } else {
+    pb_check_cols(cand, "layer", "candidate points")
+    w <- pb_normalize_weights(cand[["layer"]], "candidate weights")
     
-    closestHFs <- apply(st_drop_geometry(displaced.sf), 1, function(x) {
-      
-      rowDHSID <- x[displaced.id]
-      
-      # extract an sf object for each row of the data frame
-      singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
-      crs2use <- raster::crs(singleComm)
-      
-      # If the administrative boundary is defined
-      if (!is.null(adminBound)) {
-        # get the single admin boundary for a community
-        singleAdminBound <- suppressWarnings(sf::st_intersection(singleComm, adminBound))
-        singleAdminBound.poly <- dplyr::filter(adminBound, adminID == singleAdminBound$adminID[1])
-      }
-      if (st_coordinates(singleComm)[2] != 0) {
-        
-        # rasterize the displacement buffer around the single community
-        singleDens.raster <- rasterizeDisplacement(
-          densityBuffer, 
-          initialCoords = st_coordinates(singleComm), 
-          inputCRS = crs2use
-        )
-        
-        
-        # If the administrative boundary is specified, trim the probability buffer by the polygon layer
-        if (!is.null(adminBound)) {
-          singleDens.raster <- pb_trim_probRaster_to_point_admin(
-            probRaster = singleDens.raster,
-            point_sf   = singleComm,
-            adminBound = adminBound,
-            adminID    = "adminID"
-          )
-        }
-        
-        
-        
-        # turn these into a point object
-        singleDens.sf <- st_rasterAsPoint(singleDens.raster)
-        rm(singleDens.raster)
-        
-        # Get the most probable nearby health facility
-        probableHF <- ml_polygon(singleDens.sf, polygons.sf)
-        
-        # put dhsid, spaid, and weight into a merged, single-row data frame
-        results.df <- data.frame(DHSID = rowDHSID)
-        results.df <- cbind(results.df, probableHF)
-      } else {
-        results.df <- NA
-      }
-      
-      return(results.df)
-      
-    })
-  }
-  
-  closestHFs.df <- iotools::fdrbind(closestHFs) |> as.data.frame()
-  
-  return(closestHFs.df)
-}
-
-
-#' @name pb_weightedPolyJoin
-#' @rdname pb_weightedPolyJoin
-#' @title  pb_weightedPolyJoin
-#'
-#' @description For each given displaced community, estimates the raster value based on the probability weighted mean of possible true locations
-#' 
-#' @returns Returns a dataframe of length nrow(displaced.sf), with a DHSID column containing the unique ID of displaced.sf and SPAID containing the unique ID of the most likely polygon that a given point falls in.
-#'
-#'
-#' @param displaced.sf Displaced coordinates in an sf object type.
-#' @param polygons.sf Polygons to join the displaced points to. For now, the function assumes there is a column with unique ID for each polygon called "SPAID"
-#' @param metrics Character vector of column names containing the numeric metrics you wish to calculate.
-#' @param densityBuffer A density buffer list object created with the pb_integratedDens function.
-#' @param adminBound (Optional) the administrative boundary that circumscribes the displacement.
-#' @param adminID The unique ID for the adminBound features, defaults to "ID_2".
-#' @param n.cores This allows for parallelization using the futures package. This can be slightly unstable, but normally functions well and dramatically speeds compute time when it does. n.cores specifies the number of cores to use. The default is 1, and does not parallelize.
-#'
-#' @author J.W. Rozelle
-#'
-#'
-#' @export pb_weightedPolyJoin
-#' @examples
-#'
-#' # coming soon!
-#' 
-
-pb_weightedPolyJoin <- function(displaced.sf, 
-                                polygons.sf, 
-                                displaced.id = "DHSID", 
-                                metrics = c("sri_score", 
-                                            "sri_basicamenities", 
-                                            "sri_basicequip", 
-                                            "sri_diagcapacity", 
-                                            "sri_infprev", 
-                                            "sri_med"
-                                ), 
-                                densityBuffer = NULL, 
-                                adminBound = NULL, 
-                                adminID = "ID_2",
-                                n.cores = 1) {
-  
-  displaced.sf$DHSID <- displaced.sf[[displaced.id]]
-  
-  
-  if (n.cores > 1) {
+    # Assign candidates to polygons (within join)
+    inter <- suppressWarnings(sf::st_join(
+      cand[, "layer", drop = FALSE],
+      polygons.sf[, polygons.id, drop = FALSE],
+      join = sf::st_within,
+      left = FALSE
+    ))
     
-    tryCatch({
-      
-      # set up the workers
-      cl <- parallel::makeCluster(n.cores)
-      plan(cluster, workers = cl)
-      
-      closestHFs <- future_apply(st_drop_geometry(displaced.sf), 1, function(x) {
-        
-        rowDHSID <- x[displaced.id]
-        
-        # extract an sf object for each row of the data frame
-        singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
-        crs2use <- raster::crs(singleComm)
-        
-        if (st_coordinates(singleComm)[2] != 0) {
-          
-          # rasterize the displacement buffer around the single community
-          singleDens.raster <- rasterizeDisplacement(
-            densityBuffer, 
-            initialCoords = st_coordinates(singleComm), 
-            inputCRS = crs2use
-          )
-          
-          # If the administrative boundary is defined
-          if (!is.null(adminBound)) {
-            # get the single admin boundary for a community
-            singleAdminBound <- suppressWarnings(sf::st_intersection(singleComm, adminBound))
-            singleAdminBound.poly <- dplyr::filter(adminBound, adminID == singleAdminBound$adminID[1])
-            
-            # Trim the weighted raster
-            singleDens.raster <- trimProbBuff(singleDens.raster, adminBound = adminBound)
-            rm(singleAdminBound, singleAdminBound.poly)
-          }
-          
-          
-          
-          # turn these into a point object
-          singleDens.sf <- st_rasterAsPoint(singleDens.raster)
-          rm(singleDens.raster)
-          
-          # Get the most probable nearby health facility
-          probableMetrics.result <- pb_weighted_metrics(
-            bufferPoints.sf = singleDens.sf,
-            polygons.sf = polygons.sf,
-            poly_id = "SPAID",
-            weightVar = "layer",
-            metrics = metrics
-          )
-          probableMetrics.df <- probableMetrics.result$weightedMetrics.df
-          probableMetrics.df$DHSID <- rowDHSID
-          probableMetrics.df$n_linked <- nrow(probableMetrics.result$hfWeights)
-          
-          hfWeights.df <- probableMetrics.result$hfWeights
-          hfWeights.df$DHSID <- rowDHSID
-          
-          
-          
-        } else {
-          probableMetrics.df <- NA
-          hfWeights.df <- NA
-        }
-        
-        return(list(probableMetrics.df = probableMetrics.df, hfWeights.df = hfWeights.df))
-        
-      })
-      
-    }, 
-    finally = {parallel::stopCluster(cl)}
+    if (nrow(inter) == 0) {
+      # No candidates fell in any polygon
+      return(data.frame(
+        id = id_i,
+        poly = character(0),
+        p_hat = numeric(0)
+      ))
+    }
+    
+    dt <- sf::st_drop_geometry(inter)
+    
+    # Aggregate weight mass by polygon id
+    # Use base aggregate to avoid extra deps
+    mass <- stats::aggregate(
+      x  = dt[["layer"]],
+      by = list(poly = dt[[polygons.id]]),
+      FUN = sum, na.rm = TRUE
     )
+    names(mass)[2] <- "p_hat"
     
+    # Normalize defensively (pb_apply_densityBuffer should already do this)
+    mass$p_hat <- pb_normalize_weights(mass$p_hat, "polygon probability mass")
     
-  } else {
+    if (drop_zero) mass <- mass[mass$p_hat > 0, , drop = FALSE]
     
-    closestHFs <- apply(st_drop_geometry(displaced.sf), 1, function(x) {
-      
-      rowDHSID <- x[displaced.id]
-      
-      # extract an sf object for each row of the data frame
-      singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
-      crs2use <- raster::crs(singleComm)
-      
-      if (st_coordinates(singleComm)[2] != 0) {
-        
-        # rasterize the displacement buffer around the single community
-        singleDens.raster <- rasterizeDisplacement(
-          densityBuffer, 
-          initialCoords = st_coordinates(singleComm), 
-          inputCRS = crs2use
-        )
-        
-        # If the administrative boundary is defined
-        if (!is.null(adminBound)) {
-          # get the single admin boundary for a community
-          singleAdminBound <- suppressWarnings(sf::st_intersection(singleComm, adminBound))
-          singleAdminBound.poly <- dplyr::filter(adminBound, adminID == singleAdminBound$adminID[1])
-          
-          # Trim the weighted raster
-          singleDens.raster <- trimProbBuff(singleDens.raster, adminBound = adminBound)
-          rm(singleAdminBound, singleAdminBound.poly)
-        }
-        
-        
-        
-        # turn these into a point object
-        singleDens.sf <- st_rasterAsPoint(singleDens.raster)
-        rm(singleDens.raster)
-        
-        # Get the most probable nearby health facility
-        probableMetrics.result <- pb_weighted_metrics(
-          bufferPoints.sf = singleDens.sf,
-          polygons.sf = polygons.sf,
-          poly_id = "SPAID",
-          weightVar = "layer",
-          metrics = metrics
-        )
-        probableMetrics.df <- probableMetrics.result$weightedMetrics.df
-        probableMetrics.df$DHSID <- rowDHSID
-        probableMetrics.df$n_linked <- nrow(probableMetrics.result$hfWeights)
-        
-        hfWeights.df <- probableMetrics.result$hfWeights
-        hfWeights.df$DHSID <- rowDHSID
-        
-        
-        
-      } else {
-        probableMetrics.df <- NA
-        hfWeights.df <- NA
-      }
-      
-      return(list(probableMetrics.df = probableMetrics.df, hfWeights.df = hfWeights.df))
-      
-    })
+    data.frame(
+      id = id_i,
+      poly = as.character(mass$poly),
+      p_hat = as.numeric(mass$p_hat)
+    )
+  })
+  
+  out <- do.call(rbind, res_list)
+  
+  # Standardize names
+  if (nrow(out) == 0) {
+    out <- data.frame(
+      displaced_id = character(0),
+      polygon_id   = character(0),
+      p_hat        = numeric(0)
+    )
+    names(out) <- c(displaced.id, polygons.id, "p_hat")
+    return(out)
   }
   
-  
-  # tidy things up, put into a single data frame
-  #   Extract the objects of interest from the list
-  #     probableMetrics
-  probableMetrics.list <- lapply(closestHFs, function(x) {
-    x$probableMetrics.df
-  }) 
-  #     hfWeights
-  hfWeights.list <- lapply(closestHFs, function(x) {
-    x$hfWeights.df
-  }) 
-  
-  rm(closestHFs)
-  
-  #   bind them into a dataframe
-  probableMetrics.df <- iotools::fdrbind(probableMetrics.list)
-  hfWeights.df <- iotools::fdrbind(hfWeights.list)
-  
-  rm(probableMetrics.list)
-  rm(hfWeights.list)
-  
-  
-  
-  return(list(probableMetrics.df = probableMetrics.df, hfWeights.df = hfWeights.df))
+  names(out) <- c(displaced.id, polygons.id, "p_hat")
+  out
 }
 
-
+#' Most likely polygon under positional uncertainty (MAP)
+#'
+#' @description
+#' Wrapper around `pb_polyProbsJoin()` that returns, for each displaced point,
+#' the polygon with maximum estimated probability mass.
+#'
+#' @inheritParams pb_polyProbsJoin
+#'
+#' @return A data.frame with columns:
+#'   - displaced.id
+#'   - polygons.id (MAP polygon; NA if none)
+#'   - p_hat (probability of MAP; NA if none)
+#' @export
+pb_polyJoin <- function(displaced.sf,
+                        polygons.sf,
+                        displaced.id = "DHSID",
+                        polygons.id = "SPAID",
+                        densityBuffer = NULL,
+                        adminBound = NULL,
+                        adminID = NULL) {
+  
+  probs <- pb_polyProbsJoin(
+    displaced.sf = displaced.sf,
+    polygons.sf  = polygons.sf,
+    displaced.id = displaced.id,
+    polygons.id  = polygons.id,
+    densityBuffer = densityBuffer,
+    adminBound = adminBound,
+    adminID = adminID,
+    drop_zero = TRUE
+  )
+  
+  # If a point has no polygon mass, return NA row for that ID
+  if (nrow(probs) == 0) {
+    out <- data.frame(
+      id = displaced.sf[[displaced.id]],
+      poly = NA_character_,
+      p_hat = NA_real_
+    )
+    names(out) <- c(displaced.id, polygons.id, "p_hat")
+    return(out)
+  }
+  
+  # Pick MAP per displaced.id
+  # (Base R split/apply to avoid extra deps)
+  split_idx <- split(seq_len(nrow(probs)), probs[[displaced.id]])
+  
+  out_list <- lapply(names(split_idx), function(id_i) {
+    rows <- split_idx[[id_i]]
+    j <- rows[which.max(probs$p_hat[rows])]
+    data.frame(
+      id = probs[[displaced.id]][j],
+      poly = probs[[polygons.id]][j],
+      p_hat = probs$p_hat[j]
+    )
+  })
+  
+  out <- do.call(rbind, out_list)
+  names(out) <- c(displaced.id, polygons.id, "p_hat")
+  
+  # Ensure every displaced point appears exactly once (even if none)
+  missing_ids <- setdiff(displaced.sf[[displaced.id]], out[[displaced.id]])
+  if (length(missing_ids) > 0) {
+    out <- rbind(out, data.frame(
+      tmp_id = missing_ids,
+      tmp_poly = NA_character_,
+      tmp_p = NA_real_
+    ) |> `names<-`(c(displaced.id, polygons.id, "p_hat")))
+  }
+  
+  # Preserve input order
+  out <- out[match(displaced.sf[[displaced.id]], out[[displaced.id]]), , drop = FALSE]
+  
+  rownames(out) <- NULL
+  out
+}
