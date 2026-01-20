@@ -31,6 +31,11 @@ pb_mcDensity <- function(cellMeters = 50,
   if (!is.numeric(boundaries) || anyNA(boundaries) || any(boundaries <= 0)) {
     stop("boundaries must be a positive numeric vector.", call. = FALSE)
   }
+  
+  if (length(boundaries) == 1L) {
+    weights <- 1
+  }
+  
   if (length(boundaries) != length(weights)) {
     stop("boundaries and weights must have equal length.", call. = FALSE)
   }

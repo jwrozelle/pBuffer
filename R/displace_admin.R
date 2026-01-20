@@ -55,44 +55,34 @@ pb_assign_admin <- function(point_sf,
 }
 
 
-#' DHS-protocol displacement constrained to original administrative unit
+#' DHS displacement constrained to administrative boundaries (protocol)
 #'
-#' Applies DHS-style displacement (urban up to 2 km; rural up to 5 km with a small
-#' fraction allowed up to 10 km) and **repeats the displacement draw** until every
-#' displaced point falls within the same administrative polygon as its original
-#' location.
+#' @description
+#' Implements a DHS-style displacement protocol where displaced points must remain
+#' within the same administrative polygon as their original locations.
 #'
-#' Internally, this function:
-#' 1. assigns each original point to an admin polygon via `pb_assign_admin()`;
-#' 2. displaces points once via `pb_displace_once_dhs()`;
-#' 3. re-assigns displaced points to polygons;
-#' 4. re-draws displacement only for points whose polygon changed (or became NA),
-#'    repeating until all points match.
+#' The protocol is:
+#' 1) Assign each original point to an admin polygon (within-join).
+#' 2) Displace points once according to DHS rules.
+#' 3) Re-assign displaced points to polygons.
+#' 4) Any points that changed polygons are re-displaced (re-drawn) until all points
+#'    remain within their original polygon.
 #'
-#' @param point_sf An `sf` object with POINT geometry representing original locations.
-#' @param poly_sf An `sf` object with POLYGON/MULTIPOLYGON geometry used to constrain
-#'   displacement (e.g., admin2 boundaries).
-#' @param point_id Name of the unique ID column in `point_sf` (default `"DHSID"`).
-#' @param poly_id Name of the unique ID column in `poly_sf` (default `"ID_2"`).
-#' @param verbose Logical; if TRUE, prints iteration progress messages (default TRUE).
+#' @param point_sf An `sf` object with POINT geometry.
+#' @param poly_sf An `sf` object with POLYGON/MULTIPOLYGON geometry.
+#' @param point_id Name of unique ID column in `point_sf` (default `"DHSID"`).
+#' @param poly_id Name of polygon ID column in `poly_sf` (default `"ID_2"`).
+#' @param useCRS Optional CRS override passed through to `pb_displace_once_dhs()`.
+#' @param urban_col Name of urban/rural indicator column (default `"URBAN_RURA"`).
+#' @param p_rural_hi Proportion of rural points displaced to `rural_max_hi`.
+#' @param rural_max Max rural displacement in meters.
+#' @param rural_max_hi Max rural displacement in meters for the tail fraction.
+#' @param urban_max Max urban displacement in meters.
+#' @param uniform_area If TRUE, sample displacement radius uniformly over area.
+#' @param verbose If TRUE, prints progress messages.
 #'
-#' @return An `sf` object with displaced POINT geometry and original attributes, plus:
-#'   - the original admin ID column (`poly_id`)
-#'   - the displaced admin ID column (`paste0(poly_id, ".disp")`)
-#'   - displacement diagnostic columns created by `pb_displace_once_dhs()` (e.g.,
-#'     `originalX`, `originalY`, offsets, etc.)
-#'
+#' @return An `sf` object of displaced points, with the original admin ID retained.
 #' @export
-#'
-#' @examples
-#' \dontrun{
-#' displaced <- pb_displace_protocol_dhs(
-#'   point_sf = dhs_sf,
-#'   poly_sf = adm2_sf,
-#'   point_id = "DHSID",
-#'   poly_id = "ID_2"
-#' )
-#' }
 pb_displace_protocol_dhs <- function(point_sf,
                                      poly_sf,
                                      point_id = "DHSID",
@@ -104,9 +94,9 @@ pb_displace_protocol_dhs <- function(point_sf,
                                      rural_max_hi = 10000,
                                      urban_max = 2000,
                                      uniform_area = FALSE,
-                                     verbose = TRUE
-                                     ) {
+                                     verbose = TRUE) {
   
+  # ---- validation ----
   pb_check_sf(point_sf, "point_sf")
   pb_check_geom_type(point_sf, "POINT", "point_sf")
   pb_check_cols(point_sf, point_id, "point_sf")
@@ -118,97 +108,68 @@ pb_displace_protocol_dhs <- function(point_sf,
   pb_check_cols(poly_sf, poly_id, "poly_sf")
   pb_check_unique_id(sf::st_drop_geometry(poly_sf), poly_id, "poly_sf")
   
-  crs_in <- sf::st_crs(point_sf)
+  # ---- original admin IDs ----
+  original_admins <- pb_assign_admin(
+    point_sf,
+    poly_sf,
+    point_id = point_id,
+    poly_id = poly_id
+  )
   
-  
-  # Original admin IDs
-  original_admins <- pb_assign_admin(point_sf, poly_sf, point_id = point_id, poly_id = poly_id)
-  
-  # Attach original admin IDs to points
+  # Attach original admin IDs to points (preserve sf)
   dataset.sf <- merge(point_sf, original_admins, by = point_id)
   
-  # Storage for accepted displaced points (KEEP sf class!)
+  # Storage for accepted displaced points (keep sf class)
   final_displacement <- dataset.sf[0, ]
   
-  i <- 0L
-  mismatches <- nrow(dataset.sf)
-  mismatched.sf <- NULL
+  # Everything starts mismatched until proven otherwise
+  mismatched.sf <- dataset.sf
+  mismatches <- nrow(mismatched.sf)
+  iter <- 0L
   
-
-  
-  while (mismatches > 0) {
-    i <- i + 1L
+  # ---- protocol loop ----
+  while (mismatches > 0L) {
+    iter <- iter + 1L
+    if (verbose) message(sprintf("Protocol iteration %d; redrawing %d points.", iter, mismatches))
     
-    # If we have mismatches from last iteration, reset geometry back to original coordinates
-    if (!is.null(mismatched.sf) && nrow(mismatched.sf) > 0) {
-      tmp <- sf::st_set_geometry(mismatched.sf, NULL)
-      # pb_displace_once_dhs() expects geometry at original coords; reconstruct from originalX/Y
-      dataset.sf <- sf::st_as_sf(tmp, coords = c("originalX", "originalY"), crs = crs_in)
-    }
-    
-    if (verbose) {
-      message(sprintf("Starting iteration %d with %d observations needing displacement", i, nrow(dataset.sf)))
-    }
-    
-    # Displace once (uses DHS-style rules)
+    # Draw a displacement for currently mismatched points
     displaced <- pb_displace_once_dhs(
-      dataset.sf, 
-      useCRS = NULL,
-      urban_col = urban_col,
-      p_rural_hi = p_rural_hi,
-      rural_max = rural_max,
+      sfDataset    = mismatched.sf,
+      useCRS       = useCRS,          # FIX: respect user argument
+      urban_col    = urban_col,
+      p_rural_hi   = p_rural_hi,
+      rural_max    = rural_max,
       rural_max_hi = rural_max_hi,
-      urban_max = urban_max,
-      uniform_area = FALSE
-      )
+      urban_max    = urban_max,
+      uniform_area = uniform_area     # FIX: respect user argument
+    )
     
-    if (verbose) message(sprintf("Displaced %d clusters.", nrow(displaced)))
-    
-    # Check which administrative boundary it falls in now.
+    # Re-assign displaced points to polygons
     displaced_admins <- pb_assign_admin(
       displaced,
       poly_sf,
       point_id = point_id,
-      poly_id = poly_id,
+      poly_id  = poly_id,
       newsuffix = ".disp"
     )
     
-    displaced <- merge(
-      displaced,
-      displaced_admins,
-      by = point_id,
-      all.x = TRUE,
-      all.y = FALSE
-    )
+    # Merge the displaced admin IDs onto displaced points
+    displaced <- merge(displaced, displaced_admins, by = point_id)
     
-    # Identify mismatches:
-    # mismatch if original polygon is non-missing and displaced polygon differs or becomes NA
+    # Determine which points stayed in the same admin unit
+    orig_col <- poly_id
     disp_col <- paste0(poly_id, ".disp")
     
-    displaced$mismat <- 0L
-    displaced$mismat <- ifelse(!is.na(displaced[[poly_id]]) &
-                                 (is.na(displaced[[disp_col]]) | displaced[[disp_col]] != displaced[[poly_id]]),
-                               1L, displaced$mismat)
+    # If any displaced points fail assignment (e.g., topological edge cases),
+    # treat them as mismatches so they get redrawn.
+    same_admin <- !is.na(displaced[[disp_col]]) & displaced[[orig_col]] == displaced[[disp_col]]
     
-    # Extract mismatched
-    mismatched.sf <- displaced[displaced$mismat == 1L, ]
-    
-    # Drop the displaced polygon ID column so it can be re-created cleanly next loop
-    if (nrow(mismatched.sf) > 0) {
-      mismatched.sf[[disp_col]] <- NULL
-      mismatched.sf$mismat <- NULL
-    }
+    matching_admins.sf <- displaced[same_admin, , drop = FALSE]
+    mismatched.sf      <- displaced[!same_admin, , drop = FALSE]
     
     mismatches <- nrow(mismatched.sf)
     
-    # Keep the displacements that are in the same polygon
-    matching_admins.sf <- displaced[displaced$mismat == 0L, ]
-    matching_admins.sf$mismat <- NULL
-    
-    if (verbose) {
-      message(sprintf("There are %d added to the final_displacement.", nrow(matching_admins.sf)))
-    }
-    
+    # Accumulate the accepted points
     if (nrow(matching_admins.sf) > 0) {
       final_displacement <- rbind(final_displacement, matching_admins.sf)
     }
@@ -218,7 +179,9 @@ pb_displace_protocol_dhs <- function(point_sf,
     }
   }
   
-  rownames(final_displacement) <- paste0("disp_", sim1_view[[point_id]])
+  # ---- return ----
+  # FIX: remove invalid rowname assignment; if rownames are desired, base them on the output ID.
+  rownames(final_displacement) <- paste0("disp_", final_displacement[[point_id]])
   
   final_displacement
 }
