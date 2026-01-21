@@ -2,77 +2,57 @@
 % Please edit documentation in R/join_raster.R
 \name{pb_rasterValJoin}
 \alias{pb_rasterValJoin}
-\title{pb_rasterValJoin}
+\title{Probability-weighted raster value under positional uncertainty}
 \usage{
 pb_rasterValJoin(
   displaced.sf,
   inputRaster,
-  bufferlength = 5000,
+  densityBuffer,
   displaced.id = "DHSID",
   adminBound = NULL,
   adminID = "ID_2",
-  n.cores = 1,
-  eps = 1e-06
+  radius_m = NULL,
+  n.cores = 1
 )
 }
 \arguments{
-\item{displaced.sf}{An \code{sf} POINT object containing displaced locations.}
+\item{displaced.sf}{An \code{sf} POINT object with displaced locations.}
 
-\item{inputRaster}{A \code{raster::RasterLayer} from which values are extracted.}
+\item{inputRaster}{A \code{raster::RasterLayer} to extract values from.}
 
-\item{bufferlength}{Numeric scalar buffer radius in meters (default 5000). This
-implementation expects a single value; pass one radius at a time.}
+\item{densityBuffer}{A \code{pb_densityBuffer} object (or legacy object returned by
+\code{pb_Density()} / \code{pb_integratedDensity()}).}
 
-\item{displaced.id}{Name of the unique ID column in \code{displaced.sf} (default \code{"DHSID"}).}
+\item{displaced.id}{Name of unique ID column in \code{displaced.sf}.}
 
-\item{adminBound}{Optional \code{sf} polygon boundary used to constrain extraction. If provided,
-the raster is masked to the polygon containing each point before weighting.}
+\item{adminBound}{Optional \code{sf} polygons used to constrain weights to the polygon
+containing each point.}
 
-\item{adminID}{Name of the unique polygon ID column in \code{adminBound} (default \code{"ID_2"}).}
+\item{adminID}{Admin polygon ID column name in \code{adminBound} (default "ID_2").}
 
-\item{n.cores}{Integer number of workers for parallel execution (default 1). Uses
-\code{future.apply::future_lapply()} when \code{n.cores > 1}.}
+\item{radius_m}{Optional scalar radius override (single-kernel mode). If NULL,
+uses the largest radius available in densityBuffer.}
 
-\item{eps}{Small positive constant used to stabilize the kernel at the origin (default \code{1e-6}).}
-
-\item{bufferlengths}{The radius of the probability buffer to use}
+\item{n.cores}{Number of parallel workers (default 1). Uses \code{future.apply} if > 1.}
 }
 \value{
-Returns a list of two dataframes: estimate.df and commVals.df. estimate.df contains the best estimate of the raster value, while commVals.df contains all possible raster cells and their respective weights.
-
-A list with two data.frames:
-\describe{
-  \item{estimate.df}{One row per point ID with the probability-weighted raster estimate.}
-  \item{commVals.df}{Long data.frame of candidate raster cell values and weights by point ID.}
-}
+A list with:
+  \itemize{
+    \item \code{estimate.df}: data.frame with \code{displaced.id} and \code{estimate}
+    \item \code{commVals.df}: data.frame placeholder (kept for API compatibility)
+  }
 }
 \description{
-Estimates th
+For each displaced point, estimates the raster value at the unobserved true location
+by applying a probability kernel (density buffer) centered at the displaced point and
+taking a probability-weighted mean of raster cell values.
 }
 \details{
-This function can run rather slowly, since it re-calculates the probability raster for every community location. This is probably overkill, and unless the raster resolution is very low the pb_quickRasterValJoin would be nearly indestinguishable.
-
-The kernel implemented here corresponds to *uniform-in-radius* displacement within
-a circle of radius \code{bufferlength}: the implied density over area is
-\eqn{f(x,y) = 1 / (2 \pi R \sqrt{x^2 + y^2})} for \eqn{\sqrt{x^2+y^2} \le R}.
-This integrates to 1 over the circle but is numerically singular at the origin.
-For the cell containing the origin, the implementation uses a small \code{eps}
-adjustment in the denominator to avoid numerical failure in the integrator.
+The kernel is provided by \code{densityBuffer}, created via \code{pb_densityBuffer()}.
+The densityBuffer may be integral-based or MC-based, and may optionally include mixture
+metadata (e.g., rural 99% 5km + 1% 10km). Mixture logic and optional admin trimming are
+applied internally and transparently.
 
 Missing raster values are excluded from the weighted mean; weights are implicitly
-renormalized over the non-missing subset via \code{weighted.mean(..., na.rm=TRUE)}.
-}
-\examples{
-
-# coming soon!
-
-Probability-weighted raster value under positional uncertainty
-
-For each displaced point, estimates the raster value at the (unobserved) true location
-by integrating a probability kernel over raster cells within a specified radius and
-computing a probability-weighted mean of raster values.
-
-}
-\author{
-J.W. Rozelle
+renormalized after trimming by \code{pb_apply_densityBuffer()}.
 }

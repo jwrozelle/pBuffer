@@ -18,38 +18,36 @@ pb_cloud_dhs_mc(
 )
 }
 \arguments{
-\item{point_sf}{A single-row `sf` POINT object (one cluster). Must include `urban_col`.}
+\item{point_sf}{Single-row \code{sf} POINT object.}
 
-\item{n_draws}{Number of Monte Carlo draws (default 200000).}
+\item{n_draws}{Number of Monte Carlo draws.}
 
-\item{urban_col}{Name of urban/rural column (default `"URBAN_RURA"`, expecting `"U"`/`"R"`).}
+\item{urban_col}{Name of urban/rural column (expects "U"/"R").}
 
-\item{p_rural_hi}{Fraction of rural draws with higher max displacement (default 0.01).
-DHS protocol specifies 1% of rural clusters, rounded down; implemented as `floor(n_draws*p_rural_hi)`.
-Set to 0 to ignore the rare 10 km tail.}
+\item{p_rural_hi}{Tail probability for rural 10km draws.}
 
-\item{rural_max}{Rural max displacement in meters (default 5000).}
+\item{rural_max}{Rural max displacement (m).}
 
-\item{rural_max_hi}{Rare rural max displacement in meters (default 10000).}
+\item{rural_max_hi}{Rural tail max displacement (m).}
 
-\item{urban_max}{Urban max displacement in meters (default 2000).}
+\item{urban_max}{Urban max displacement (m).}
 
-\item{uniform_area}{If FALSE (default), distances are uniform in radius. If TRUE, uniform over area.}
+\item{uniform_area}{If TRUE, draws uniform in area: r = sqrt(U)*R. If FALSE, uniform in radius: r = U*R.}
 
-\item{weightsCol}{Name of the weight column in the output (default `"layer"`).}
+\item{weightsCol}{Output weight column name (default "layer").}
 
-\item{keep_offsets}{If TRUE, includes `dx` and `dy` columns in output (default TRUE).}
+\item{keep_offsets}{If TRUE, keep dx/dy columns for debugging.}
 }
 \value{
-An `sf` POINT object with `n_draws` rows. Contains a weight column (`weightsCol`)
-  summing to 1 and geometry representing the displaced locations.
+\code{sf} POINT with \code{n_draws} rows and weights summing to 1.
 }
 \description{
-Creates a cloud of candidate locations for a single DHS cluster by drawing
-many displacement realizations consistent with DHS public-use rules:
-urban: max 2 km; rural: max 5 km with a small fraction (rounded down) allowed up to 10 km.
+Creates a cloud of candidate locations for a single cluster by drawing many
+displacement realizations:
+\itemize{
+  \item urban: 0–2km
+  \item rural: 99% 0–5km, 1% 0–10km (configurable)
 }
-\details{
-The output is an sf POINT object that can be fed into pBuffer join functions
-directly, or binned into a grid via `pb_cloud_to_grid()`.
+
+This cloud can be binned to a grid using \code{pb_cloud_to_grid()}.
 }

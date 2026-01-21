@@ -2,22 +2,21 @@
 % Please edit documentation in R/prob_points_mc.R
 \name{pb_grid_to_points}
 \alias{pb_grid_to_points}
-\title{Convert a probability grid (raster) to weighted points}
+\title{Convert a probability raster to weighted points}
 \usage{
 pb_grid_to_points(prob_raster, weightsCol = "layer", drop_zeros = TRUE)
 }
 \arguments{
-\item{prob_raster}{A `raster::RasterLayer` whose values represent probabilities.}
+\item{prob_raster}{RasterLayer with probability mass per cell (sums to 1).}
 
-\item{weightsCol}{Name of output weight column (default `"layer"`).}
+\item{weightsCol}{Output weight column name (default "layer").}
 
-\item{drop_zeros}{If TRUE (default), drops cells with zero/NA probability.}
+\item{drop_zeros}{If TRUE, drops zero and NA cells.}
 }
 \value{
-An `sf` POINT object with weight column `weightsCol` summing to 1.
+\code{sf} POINT with one row per nonzero cell.
 }
 \description{
-Converts a probability raster (e.g., output of `pb_cloud_to_grid()`) into an `sf`
-POINT layer located at cell centers, with a weight column containing the raster
-cell values.
+Converts a RasterLayer of probability mass into an sf point set located at cell centers,
+with a weight column equal to the cell probability.
 }

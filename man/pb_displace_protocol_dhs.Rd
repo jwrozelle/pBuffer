@@ -2,7 +2,7 @@
 % Please edit documentation in R/displace_admin.R
 \name{pb_displace_protocol_dhs}
 \alias{pb_displace_protocol_dhs}
-\title{DHS-protocol displacement constrained to original administrative unit}
+\title{DHS displacement constrained to administrative boundaries (protocol)}
 \usage{
 pb_displace_protocol_dhs(
   point_sf,
@@ -20,45 +20,41 @@ pb_displace_protocol_dhs(
 )
 }
 \arguments{
-\item{point_sf}{An `sf` object with POINT geometry representing original locations.}
+\item{point_sf}{An `sf` object with POINT geometry.}
 
-\item{poly_sf}{An `sf` object with POLYGON/MULTIPOLYGON geometry used to constrain
-displacement (e.g., admin2 boundaries).}
+\item{poly_sf}{An `sf` object with POLYGON/MULTIPOLYGON geometry.}
 
-\item{point_id}{Name of the unique ID column in `point_sf` (default `"DHSID"`).}
+\item{point_id}{Name of unique ID column in `point_sf` (default `"DHSID"`).}
 
-\item{poly_id}{Name of the unique ID column in `poly_sf` (default `"ID_2"`).}
+\item{poly_id}{Name of polygon ID column in `poly_sf` (default `"ID_2"`).}
 
-\item{verbose}{Logical; if TRUE, prints iteration progress messages (default TRUE).}
+\item{useCRS}{Optional CRS override passed through to `pb_displace_once_dhs()`.}
+
+\item{urban_col}{Name of urban/rural indicator column (default `"URBAN_RURA"`).}
+
+\item{p_rural_hi}{Proportion of rural points displaced to `rural_max_hi`.}
+
+\item{rural_max}{Max rural displacement in meters.}
+
+\item{rural_max_hi}{Max rural displacement in meters for the tail fraction.}
+
+\item{urban_max}{Max urban displacement in meters.}
+
+\item{uniform_area}{If TRUE, sample displacement radius uniformly over area.}
+
+\item{verbose}{If TRUE, prints progress messages.}
 }
 \value{
-An `sf` object with displaced POINT geometry and original attributes, plus:
-  - the original admin ID column (`poly_id`)
-  - the displaced admin ID column (`paste0(poly_id, ".disp")`)
-  - displacement diagnostic columns created by `pb_displace_once_dhs()` (e.g.,
-    `originalX`, `originalY`, offsets, etc.)
+An `sf` object of displaced points, with the original admin ID retained.
 }
 \description{
-Applies DHS-style displacement (urban up to 2 km; rural up to 5 km with a small
-fraction allowed up to 10 km) and **repeats the displacement draw** until every
-displaced point falls within the same administrative polygon as its original
-location.
-}
-\details{
-Internally, this function:
-1. assigns each original point to an admin polygon via `pb_assign_admin()`;
-2. displaces points once via `pb_displace_once_dhs()`;
-3. re-assigns displaced points to polygons;
-4. re-draws displacement only for points whose polygon changed (or became NA),
-   repeating until all points match.
-}
-\examples{
-\dontrun{
-displaced <- pb_displace_protocol_dhs(
-  point_sf = dhs_sf,
-  poly_sf = adm2_sf,
-  point_id = "DHSID",
-  poly_id = "ID_2"
-)
-}
+Implements a DHS-style displacement protocol where displaced points must remain
+within the same administrative polygon as their original locations.
+
+The protocol is:
+1) Assign each original point to an admin polygon (within-join).
+2) Displace points once according to DHS rules.
+3) Re-assign displaced points to polygons.
+4) Any points that changed polygons are re-displaced (re-drawn) until all points
+   remain within their original polygon.
 }

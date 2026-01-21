@@ -2,47 +2,31 @@
 % Please edit documentation in R/prob_points_mc.R
 \name{pb_cloud_to_grid}
 \alias{pb_cloud_to_grid}
-\title{Bin a displacement cloud into a probability grid (raster)}
+\title{Bin a Monte Carlo cloud to a probability raster}
 \usage{
 pb_cloud_to_grid(
   cloud_sf,
   cell_m = 50,
   weightsCol = "layer",
-  extent_m = NULL,
-  center_xy = NULL,
   adminBound = NULL,
-  drop_zeros = TRUE
+  adminID = "ID_2"
 )
 }
 \arguments{
-\item{cloud_sf}{An `sf` POINT object (e.g., output of `pb_cloud_dhs_mc()`).}
+\item{cloud_sf}{\code{sf} POINT cloud.}
 
-\item{cell_m}{Grid resolution in meters (default 50).}
+\item{cell_m}{Raster resolution in meters.}
 
-\item{weightsCol}{Name of the weight column in `cloud_sf` (default `"layer"`). If missing,
-points are treated as equal weight.}
+\item{weightsCol}{Weight column name in \code{cloud_sf}. If missing, points treated as equal weight.}
 
-\item{extent_m}{Optional numeric scalar giving half-width of the square extent centered on
-`center_xy`. If NULL, extent is derived from the cloud bounding box.}
+\item{adminBound}{Optional \code{sf} polygon to mask/trim the probability raster.}
 
-\item{center_xy}{Optional numeric length-2 vector c(x,y) for grid centering. If NULL,
-uses the centroid of the cloud’s bbox.}
-
-\item{adminBound}{Optional `sf` polygon used to trim/mask the grid (default NULL).}
-
-\item{drop_zeros}{If TRUE (default), zeros remain zeros in raster; conversion to points
-can drop them later.}
+\item{adminID}{Admin ID column in adminBound.}
 }
 \value{
-A `raster::RasterLayer` whose cell values sum to 1.
+\code{raster::RasterLayer} whose cell values sum to 1.
 }
 \description{
-Converts a set of candidate point locations (an sf POINT cloud) into a discrete
-probability surface on a regular grid. By default this uses simple cell binning
-(counts) and then normalizes to sum to 1. If a weights column is provided, cell
-values are the sum of weights.
-}
-\details{
-Optionally trims/masks the grid to an administrative boundary and renormalizes
-via `trimProbBuff()`.
+Converts a cloud of candidate points (with optional weights) into a RasterLayer
+where cell values represent probability mass and sum to 1 (after optional trimming).
 }

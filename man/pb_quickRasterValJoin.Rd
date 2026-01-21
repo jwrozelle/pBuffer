@@ -2,44 +2,41 @@
 % Please edit documentation in R/join_raster.R
 \name{pb_quickRasterValJoin}
 \alias{pb_quickRasterValJoin}
-\title{pb_quickRasterValJoin}
+\title{Quick probability-weighted raster join (API-compatible wrapper)}
 \usage{
 pb_quickRasterValJoin(
   displaced.sf,
   inputRaster,
-  bufferlengths = 5000,
+  densityBuffer,
   displaced.id = "DHSID",
   adminBound = NULL,
-  adminID = NULL,
+  adminID = "ID_2",
+  radius_m = NULL,
   n.cores = 1
 )
 }
 \arguments{
-\item{displaced.sf}{Displaced coordinates in an sf object type.}
+\item{displaced.sf}{An \code{sf} POINT object with displaced locations.}
 
-\item{displaced.id}{The name of the column that contains a unique ID for the displaced communities.}
+\item{inputRaster}{A \code{raster::RasterLayer} to extract values from.}
 
-\item{adminBound}{(Optional) the administrative boundary that circumscribes the displacement}
+\item{densityBuffer}{A \code{pb_densityBuffer} object (or legacy object returned by
+\code{pb_Density()} / \code{pb_integratedDensity()}).}
 
-\item{adminID}{The unique ID for the adminBound featurs, defaults to "ID_2".}
+\item{displaced.id}{Name of unique ID column in \code{displaced.sf}.}
 
-\item{n.cores}{This allows for parallelization using the futures package. This can be slightly unstable, but normally functions well and dramatically speeds compute time when it does. n.cores specifies the number of cores to use. The default is 1, and does not parallelize.}
+\item{adminBound}{Optional \code{sf} polygons used to constrain weights to the polygon
+containing each point.}
 
-\item{polygons.sf}{Polygons to join the displaced points to. For now, the function assumes there is a column with unique ID for each polygon called "SPAID"}
+\item{adminID}{Admin polygon ID column name in \code{adminBound} (default "ID_2").}
 
-\item{densityBuffer}{A density buffer list object created with the pb_integratedDens or pb_Density functions.}
-}
-\value{
-Returns a dataframe of length nrow(displaced.sf), with a DHSID column containing the unique ID of displaced.sf and SPAID containing the unique ID of the most likely polygon that a given point falls in.
+\item{radius_m}{Optional scalar radius override (single-kernel mode). If NULL,
+uses the largest radius available in densityBuffer.}
+
+\item{n.cores}{Number of parallel workers (default 1). Uses \code{future.apply} if > 1.}
 }
 \description{
-For each given displaced community, estimates the raster value based on the probability weighted mean of possible true locations
-}
-\examples{
-
-# coming soon!
-
-}
-\author{
-J.W. Rozelle
+Historically a faster variant of \code{pb_rasterValJoin()}. With densityBuffer
+caching, \code{pb_rasterValJoin()} is already the "quick" path. This function
+is retained as a wrapper for backwards compatibility.
 }

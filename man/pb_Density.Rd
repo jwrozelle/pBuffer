@@ -2,7 +2,7 @@
 % Please edit documentation in R/prob_density.R
 \name{pb_Density}
 \alias{pb_Density}
-\title{pb_Density}
+\title{Backwards-compatible density buffer (legacy API)}
 \usage{
 pb_Density(
   cellMeters = 50,
@@ -11,27 +11,18 @@ pb_Density(
 )
 }
 \arguments{
-\item{cellMeters}{Resolution of the probability buffer. Higher resolutions will result in more accuracy, but will take more computational resources to use. Default is 50 meters.}
+\item{cellMeters}{Grid resolution (meters). Default 50.}
 
-\item{boundaries}{A numeric vector of the radius limits. Defaults to 5,000 and 10,000, which is the displacement for rural clusters in the DHS (99% displaced between 0 and 5 km, 1% displaced between 0 and 10 km)}
+\item{boundaries}{Radius boundaries (meters). Default c(5000, 10000).}
 
-\item{weights}{A numeric vector for weights of the boundaries set in the boundaries argument, if using more than one boundary. Defaults to c(0.99, 0.01) based on the rural displacement probability}
+\item{weights}{Mixture weights for boundaries. Default c(0.99,0.01).}
 }
 \value{
-Returns a list with a matrix of the weights from the pdf, the input resolution, and the input boundaries
+A list-like \code{pb_densityBuffer} object with legacy fields:
+  \code{weightedCircle}, \code{cellMeters}, \code{radiusMeters}.
 }
 \description{
-This function integrates the probability density function for raster based on provided resolution, radii, and weights. Generally this function is not useful by itself, but is used as a helper function.
-}
-\examples{
-
-# create the probability density matrix
-ruralPB <- pb_Density()
-
-ruralPB.matrix <- ruralPB[["weightedCircle"]]
-
-
-}
-\author{
-J.W. Rozelle
+Historical pBuffer function that created a probability circle. This replacement
+now returns a \code{pb_densityBuffer} object while preserving legacy list fields
+expected elsewhere in the package.
 }
