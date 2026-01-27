@@ -57,7 +57,6 @@ pb_radiusLimitJoin <- function(displaced.sf,
                                probCuts = c(0.1, 0.9),
                                n.cores = 1) {
   
-  
   # --- validation (centralized) ---
   pb_check_sf(displaced.sf, "displaced.sf")
   pb_check_geom_type(displaced.sf, "POINT", "displaced.sf")
@@ -81,11 +80,9 @@ pb_radiusLimitJoin <- function(displaced.sf,
     stop("densityBuffer must be provided (e.g., pb_integratedDensity(...) or pb_mcDensity(...)).", call. = FALSE)
   }
   
-  
   pb_check_pos_scalar(limitDist, "limitDist")
   pb_check_prob_vec(probCuts, "probCuts")
   
-  # metrics must exist
   if (!all(metrics %in% names(features2count.sf))) {
     stop(
       "One or more column names specified in metrics cannot be found in features2count.sf: ",
@@ -94,271 +91,129 @@ pb_radiusLimitJoin <- function(displaced.sf,
     )
   }
   
-  
-  # Assign unique id name to "DHSID" column
+  # standard internal column names
   displaced.sf$DHSID <- displaced.sf[[displaced.id]]
-  # assign unique ID name to the "SPAID_use" column
   features2count.sf$SPAID_use <- features2count.sf[[features2count.id]]
   
-  # assign the adminID character value ot adminID variable name in dataframe
   if (!is.null(adminBound)) {
     adminBound$adminID <- sf::st_drop_geometry(adminBound)[[adminID]]
   }
   
-  
-  if (n.cores > 1) {
+  # worker function (used by both branches)
+  one_comm <- function(xrow) {
     
-    tryCatch({
-      
-      # set up the workers
-      cl <- parallel::makeCluster(n.cores)
-      plan(cluster, workers = cl)
-      
-      numFeatures <- future_apply(st_drop_geometry(displaced.sf), 1, function(x) {
-        
-        rowDHSID <- x[[displaced.id]]
-        
-        # extract an sf object for each row of the data frame
-        singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
-        crs2use <- raster::crs(singleComm)
-        
-        if (st_coordinates(singleComm)[2] != 0) {
-          
-          # rasterize the displacement buffer around the single community
-          if (!is.null(adminBound)) {
-            singleDens.raster <- pb_trim_probRaster_to_point_admin(
-              probRaster = singleDens.raster,
-              point_sf   = singleComm,
-              adminBound = adminBound,
-              adminID    = "adminID"
-            )
-          }
-          
-          if (!is.null(adminBound)) {
-            singleDens.raster <- pb_trim_probRaster_to_point_admin(
-              probRaster = singleDens.raster,
-              point_sf   = singleComm,
-              adminBound = adminBound,
-              adminID    = "adminID"
-            )
-          }
-          
-          
-          # turn these into a point object
-          singleDens.sf <- st_rasterAsPoint(singleDens.raster)
-          singleDens.sf$dispid <- row.names(singleDens.sf)
-          
-          rm(singleDens.raster)
-          
-          # calculate the distance matrix
-          distance.mtx <- st_distance(singleDens.sf, features2count.sf) |> as.matrix()
-          
-          # name the rows and columns
-          row.names(distance.mtx) <- singleDens.sf$dispid
-          colnames(distance.mtx) <- features2count.sf$SPAID_use
-          
-          # get ids back into the distance dataframe
-          distance.df <- as.data.frame(distance.mtx)
-          distance.df$DHSID <- rowDHSID
-          distance.df$dispid <- row.names(distance.mtx)
-          
-          # clean up after meeself
-          rm(distance.mtx)
-          
-          # merge the weights and the new values
-          singleDens.sf <- merge(singleDens.sf, distance.df, by = "dispid")
-          
-          singleDens.df <- sf::st_drop_geometry(singleDens.sf)
-          rm(singleDens.sf)
-          
-          featureDistances.list <- lapply(features2count.sf$SPAID_use, function(x) {
-            
-            # extract only the estimated distance for a pb point and the weight
-            singleFeatureDistance.df <- singleDens.df[c(x, "layer")]
-            # update name to distance for code readability
-            singleFeatureDistance.df$distance <- as.numeric(singleFeatureDistance.df[[x]])
-            
-            medianDist <- spatstat.geom::weighted.median(singleFeatureDistance.df$distance, singleFeatureDistance.df$layer)
-            # credibleInterval
-            distCrI <- spatstat.geom::weighted.quantile(singleFeatureDistance.df$distance, 
-                                                        singleFeatureDistance.df$layer, 
-                                                        # calculate middle credible interval
-                                                        probs = probCuts
-            )
-            # name credibleIntervalvalues
-            names(distCrI) <- sapply(names(distCrI), function(x) {paste0("limit_", x)})
-            distCrI.df <- as.data.frame(t(distCrI))
-            rm(distCrI)
-            
-            
-            probInLimit <- sum(ifelse(singleFeatureDistance.df$distance <= limitDist & 
-                                        !is.na(singleFeatureDistance.df$distance) & 
-                                        !is.na(singleFeatureDistance.df$layer), 
-                                      singleFeatureDistance.df$layer, 
-                                      0)
-            )
-            
-            hf_weightedDist.df <- data.frame(likelyDist = medianDist, probInLimit = probInLimit)
-            
-            hf_weightedDist.df[[features2count.id]] <- x
-            
-            hf_weightedDist.df <- cbind(hf_weightedDist.df, distCrI.df)
-            
-            return(hf_weightedDist.df)
-          })
-          
-          # bind this into a single dataframe
-          hf_weightedDist.df <- iotools::fdrbind(featureDistances.list)
-          # filter to only those that have a possibility of being within the buffer
-          hf_weightedDist.df <- filter(hf_weightedDist.df, probInLimit > 0)
-          # add in metrics of interest
-          
-          if (!is.null(metrics)) {
-            hf_weightedDist.df <- merge(hf_weightedDist.df, 
-                                        sf::st_drop_geometry(features2count.sf)[c(features2count.id, metrics)], 
-                                        by = features2count.id, 
-                                        all.x = T, 
-                                        all.y = F
-            )
-          }
-          
-        } else {
-          hf_weightedDist.df <- NA
-        }
-        
-        return(hf_weightedDist.df)
-        
-      })
-      
-    }, 
-    finally = {parallel::stopCluster(cl)}
+    rowDHSID <- xrow[[displaced.id]]
+    singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
+    
+    # guard: missing/zero geometry (your convention)
+    xy <- sf::st_coordinates(singleComm)
+    if (nrow(xy) < 1 || is.na(xy[1,2]) || xy[1,2] == 0) return(NA)
+    
+    crs2use <- raster::crs(singleComm)
+    
+    # 1) build centered probability raster
+    singleDens.raster <- rasterizeDisplacement(
+      densityBuffer,
+      initialCoords = xy[1, 1:2],
+      inputCRS = crs2use
     )
     
+    # 2) optionally admin-trim + renormalize
+    if (!is.null(adminBound)) {
+      singleDens.raster <- pb_trim_probRaster_to_point_admin(
+        probRaster = singleDens.raster,
+        point_sf   = singleComm,
+        adminBound = adminBound,
+        adminID    = "adminID"
+      )
+    }
     
-  } else {
+    # 3) raster -> weighted points
+    singleDens.sf <- st_rasterAsPoint(singleDens.raster)
+    singleDens.sf$dispid <- row.names(singleDens.sf)
+    rm(singleDens.raster)
     
-    numFeatures <- apply(st_drop_geometry(displaced.sf), 1, function(x) {
+    # 4) distances from weighted points to all facilities
+    distance.mtx <- sf::st_distance(singleDens.sf, features2count.sf) |> as.matrix()
+    
+    row.names(distance.mtx) <- singleDens.sf$dispid
+    colnames(distance.mtx) <- features2count.sf$SPAID_use
+    
+    distance.df <- as.data.frame(distance.mtx)
+    distance.df$DHSID <- rowDHSID
+    distance.df$dispid <- row.names(distance.mtx)
+    rm(distance.mtx)
+    
+    singleDens.sf <- merge(singleDens.sf, distance.df, by = "dispid")
+    singleDens.df <- sf::st_drop_geometry(singleDens.sf)
+    rm(singleDens.sf)
+    
+    # 5) summarize per facility: median distance + prob within limit + CrI
+    featureDistances.list <- lapply(features2count.sf$SPAID_use, function(fid) {
       
-      rowDHSID <- x[[displaced.id]]
+      singleFeatureDistance.df <- singleDens.df[c(fid, "layer")]
+      singleFeatureDistance.df$distance <- as.numeric(singleFeatureDistance.df[[fid]])
       
-      # extract an sf object for each row of the data frame
-      singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
-      crs2use <- raster::crs(singleComm)
-      
-      if (st_coordinates(singleComm)[2] != 0) {
-        
-        # rasterize the displacement buffer around the single community
-        if (!is.null(adminBound)) {
-          singleDens.raster <- pb_trim_probRaster_to_point_admin(
-            probRaster = singleDens.raster,
-            point_sf   = singleComm,
-            adminBound = adminBound,
-            adminID    = "adminID"
-          )
-        }
-        
-        if (!is.null(adminBound)) {
-          singleDens.raster <- pb_trim_probRaster_to_point_admin(
-            probRaster = singleDens.raster,
-            point_sf   = singleComm,
-            adminBound = adminBound,
-            adminID    = "adminID"
-          )
-        }
-        
-        
-        # turn these into a point object
-        singleDens.sf <- st_rasterAsPoint(singleDens.raster)
-        singleDens.sf$dispid <- row.names(singleDens.sf)
-        
-        rm(singleDens.raster)
-        
-        # calculate the distance matrix
-        distance.mtx <- st_distance(singleDens.sf, features2count.sf) |> as.matrix()
-        
-        # name the rows and columns
-        row.names(distance.mtx) <- singleDens.sf$dispid
-        colnames(distance.mtx) <- features2count.sf$SPAID_use
-        
-        # get ids back into the distance dataframe
-        distance.df <- as.data.frame(distance.mtx)
-        distance.df$DHSID <- rowDHSID
-        distance.df$dispid <- row.names(distance.mtx)
-        
-        # clean up after meeself
-        rm(distance.mtx)
-        
-        # merge the weights and the new values
-        singleDens.sf <- merge(singleDens.sf, distance.df, by = "dispid")
-        
-        singleDens.df <- sf::st_drop_geometry(singleDens.sf)
-        rm(singleDens.sf)
-        
-        featureDistances.list <- lapply(features2count.sf$SPAID_use, function(x) {
-          
-          # extract only the estimated distance for a pb point and the weight
-          singleFeatureDistance.df <- singleDens.df[c(x, "layer")]
-          # update name to distance for code readability
-          singleFeatureDistance.df$distance <- as.numeric(singleFeatureDistance.df[[x]])
-          
-          medianDist <- spatstat.geom::weighted.median(singleFeatureDistance.df$distance, singleFeatureDistance.df$layer)
-          # credibleInterval
-          distCrI <- spatstat.geom::weighted.quantile(singleFeatureDistance.df$distance, 
-                                                      singleFeatureDistance.df$layer, 
-                                                      # calculate middle credible interval
-                                                      probs = probCuts
-          )
-          # name credibleIntervalvalues
-          names(distCrI) <- sapply(names(distCrI), function(x) {paste0("limit_", x)})
-          distCrI.df <- as.data.frame(t(distCrI))
-          rm(distCrI)
-          
-          
-          probInLimit <- sum(ifelse(singleFeatureDistance.df$distance <= limitDist & 
-                                      !is.na(singleFeatureDistance.df$distance) & 
-                                      !is.na(singleFeatureDistance.df$layer), 
-                                    singleFeatureDistance.df$layer, 
-                                    0)
-          )
-          
-          hf_weightedDist.df <- data.frame(likelyDist = medianDist, probInLimit = probInLimit)
-          
-          hf_weightedDist.df[[features2count.id]] <- x
-          
-          hf_weightedDist.df <- cbind(hf_weightedDist.df, distCrI.df)
-          
-          return(hf_weightedDist.df)
-        })
-        
-        # bind this into a single dataframe
-        hf_weightedDist.df <- iotools::fdrbind(featureDistances.list)
-        # filter to only those that have a possibility of being within the buffer
-        hf_weightedDist.df <- filter(hf_weightedDist.df, probInLimit > 0)
-        # add in metrics of interest
-        
-        if (!is.null(metrics)) {
-          hf_weightedDist.df <- merge(hf_weightedDist.df, 
-                                      sf::st_drop_geometry(features2count.sf)[c(features2count.id, metrics)], 
-                                      by = features2count.id, 
-                                      all.x = T, 
-                                      all.y = F
-          )
-        }
-        
+      if (isTRUE(weightedMedian)) {
+        likelyDist <- spatstat.geom::weighted.median(singleFeatureDistance.df$distance,
+                                                     singleFeatureDistance.df$layer)
       } else {
-        hf_weightedDist.df <- NA
+        # weighted mean
+        likelyDist <- stats::weighted.mean(singleFeatureDistance.df$distance,
+                                           singleFeatureDistance.df$layer, na.rm = TRUE)
       }
       
-      return(hf_weightedDist.df)
+      distCrI <- spatstat.geom::weighted.quantile(
+        singleFeatureDistance.df$distance,
+        singleFeatureDistance.df$layer,
+        probs = probCuts
+      )
+      names(distCrI) <- paste0("limit_", names(distCrI))
+      distCrI.df <- as.data.frame(t(distCrI))
       
+      probInLimit <- sum(
+        ifelse(singleFeatureDistance.df$distance <= limitDist &
+                 !is.na(singleFeatureDistance.df$distance) &
+                 !is.na(singleFeatureDistance.df$layer),
+               singleFeatureDistance.df$layer,
+               0),
+        na.rm = TRUE
+      )
+      
+      out <- data.frame(likelyDist = likelyDist, probInLimit = probInLimit)
+      out[[features2count.id]] <- fid
+      cbind(out, distCrI.df)
     })
+    
+    hf_weightedDist.df <- iotools::fdrbind(featureDistances.list)
+    hf_weightedDist.df <- dplyr::filter(hf_weightedDist.df, probInLimit > 0)
+    
+    if (!is.null(metrics)) {
+      hf_weightedDist.df <- merge(
+        hf_weightedDist.df,
+        sf::st_drop_geometry(features2count.sf)[c(features2count.id, metrics)],
+        by = features2count.id,
+        all.x = TRUE, all.y = FALSE
+      )
+    }
+    
+    hf_weightedDist.df
   }
   
-  # put into a nice, tidy table
-  hf_weightedDist.df <- iotools::fdrbind(numFeatures)
+  # run
+  if (n.cores > 1) {
+    cl <- parallel::makeCluster(n.cores)
+    on.exit(parallel::stopCluster(cl), add = TRUE)
+    future::plan(future::cluster, workers = cl)
+    
+    numFeatures <- future.apply::future_apply(sf::st_drop_geometry(displaced.sf), 1, one_comm)
+  } else {
+    numFeatures <- apply(sf::st_drop_geometry(displaced.sf), 1, one_comm)
+  }
   
-  return(hf_weightedDist.df)
+  iotools::fdrbind(numFeatures)
 }
+
 
 
 
@@ -409,8 +264,6 @@ pb_countFeatures <- function(displaced.sf,
                              adminID = NULL,
                              n.cores = 1) {
   
-  
-  # --- validation (centralized) ---
   pb_check_sf(displaced.sf, "displaced.sf")
   pb_check_geom_type(displaced.sf, "POINT", "displaced.sf")
   pb_check_crs(displaced.sf, "displaced.sf")
@@ -428,7 +281,6 @@ pb_countFeatures <- function(displaced.sf,
     stop("densityBuffer must be provided (e.g., pb_integratedDensity(...) or pb_mcDensity(...)).", call. = FALSE)
   }
   
-  
   if (!is.null(adminBound)) {
     pb_check_sf(adminBound, "adminBound")
     if (is.null(adminID)) stop("adminID must be provided when adminBound is provided.", call. = FALSE)
@@ -436,187 +288,71 @@ pb_countFeatures <- function(displaced.sf,
     pb_check_unique_id(sf::st_drop_geometry(adminBound), adminID, "adminBound")
   }
   
-  
-  # Assign unique id name to "DHSID" column
   displaced.sf$DHSID <- displaced.sf[[displaced.id]]
-  # assign the adminID character value ot adminID variable name in dataframe
+  
   if (!is.null(adminBound)) {
     adminBound$adminID <- sf::st_drop_geometry(adminBound)[[adminID]]
   }
   
-  
-  
-  if (n.cores > 1) {
+  one_comm <- function(xrow) {
     
-    tryCatch({
-      
-      # set up the workers
-      cl <- parallel::makeCluster(n.cores)
-      plan(cluster, workers = cl)
-      
-      numFeatures <- future_apply(st_drop_geometry(displaced.sf), 1, function(x) {
-        
-        rowDHSID <- x[[displaced.id]]
-        
-        # extract an sf object for each row of the data frame
-        singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
-        crs2use <- raster::crs(singleComm)
-        
-        if (st_coordinates(singleComm)[2] != 0) {
-          
-          # rasterize the displacement buffer around the single community
-          if (!is.null(adminBound)) {
-            singleDens.raster <- pb_trim_probRaster_to_point_admin(
-              probRaster = singleDens.raster,
-              point_sf   = singleComm,
-              adminBound = adminBound,
-              adminID    = "adminID"
-            )
-          }
-          
-          if (!is.null(adminBound)) {
-            # get the single admin boundary for a community
-            singleAdminBound <- suppressWarnings(sf::st_intersection(singleComm, adminBound))
-            singleAdminBound.poly <- dplyr::filter(adminBound, adminID == singleAdminBound$adminID[1])
-            
-            rm(singleAdminBound)
-            
-            # Trim the weighted raster
-            singleDens.raster <- trimProbBuff(singleDens.raster, adminBound = singleAdminBound.poly)
-            
-            rm(singleAdminBound.poly)
-            
-          }
-          
-          # turn these into a point object
-          singleDens.sf <- st_rasterAsPoint(singleDens.raster)
-          rm(singleDens.raster)
-          
-          singleBuffs.sf <- st_buffer(singleDens.sf, radiusLength)
-          
-          # intersection.sf <- st_intersection(features2count.sf, singleBuffs.sf)
-          
-          singleBuffs.sf$pt_count <- lengths(st_intersects(singleBuffs.sf, features2count.sf))
-          
-          numFeatures.df <- st_drop_geometry(singleBuffs.sf) %>% group_by(pt_count) %>% summarise(weights = sum(layer, na.rm = T)) |> as.data.frame()
-          
-          
-          # Get the maximum likelihood number of features as single row data.frame
-          ml_featureCount.df <- filter(numFeatures.df, weights == max(weights, na.rm = T)) |> as.data.frame()
-          # add the unique ID to the single row data.frame
-          ml_featureCount.df[[displaced.id]] <- rowDHSID
-          
-          # 
-          numFeatures.df[[displaced.id]] <- rowDHSID
-          
-          
-          
-          
-          
-        } else {
-          ml_featureCount.df <- NA
-          possibleNumFeatures.df <- NA
-        }
-        
-        return(list(ml_featureCount.df = ml_featureCount.df, possibleNumFeatures.df = numFeatures.df))
-        
-      })
-      
-    }, 
-    finally = {parallel::stopCluster(cl)}
+    rowDHSID <- xrow[[displaced.id]]
+    singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
+    
+    xy <- sf::st_coordinates(singleComm)
+    if (nrow(xy) < 1 || is.na(xy[1,2]) || xy[1,2] == 0) {
+      return(list(ml_featureCount.df = NA, possibleNumFeatures.df = NA))
+    }
+    
+    crs2use <- raster::crs(singleComm)
+    
+    singleDens.raster <- rasterizeDisplacement(
+      densityBuffer,
+      initialCoords = xy[1, 1:2],
+      inputCRS = crs2use
     )
     
+    if (!is.null(adminBound)) {
+      singleDens.raster <- pb_trim_probRaster_to_point_admin(
+        probRaster = singleDens.raster,
+        point_sf   = singleComm,
+        adminBound = adminBound,
+        adminID    = "adminID"
+      )
+    }
     
-  } else {
+    singleDens.sf <- st_rasterAsPoint(singleDens.raster)
+    rm(singleDens.raster)
     
-    numFeatures <- apply(st_drop_geometry(displaced.sf), 1, function(x) {
-      
-      rowDHSID <- x[[displaced.id]]
-      
-      # extract an sf object for each row of the data frame
-      singleComm <- displaced.sf[displaced.sf[[displaced.id]] == rowDHSID, ]
-      crs2use <- raster::crs(singleComm)
-      
-      if (st_coordinates(singleComm)[2] != 0) {
-        
-        # rasterize the displacement buffer around the single community
-        if (!is.null(adminBound)) {
-          singleDens.raster <- pb_trim_probRaster_to_point_admin(
-            probRaster = singleDens.raster,
-            point_sf   = singleComm,
-            adminBound = adminBound,
-            adminID    = "adminID"
-          )
-        }
-        
-        if (!is.null(adminBound)) {
-          # get the single admin boundary for a community
-          singleAdminBound <- suppressWarnings(sf::st_intersection(singleComm, adminBound))
-          singleAdminBound.poly <- dplyr::filter(adminBound, adminID == singleAdminBound$adminID[1])
-          
-          rm(singleAdminBound)
-          
-          # Trim the weighted raster
-          singleDens.raster <- trimProbBuff(singleDens.raster, adminBound = singleAdminBound.poly)
-          
-          rm(singleAdminBound.poly)
-          
-        }
-        
-        # turn these into a point object
-        singleDens.sf <- st_rasterAsPoint(singleDens.raster)
-        rm(singleDens.raster)
-        
-        singleBuffs.sf <- st_buffer(singleDens.sf, radiusLength)
-        
-        # intersection.sf <- st_intersection(features2count.sf, singleBuffs.sf)
-        
-        singleBuffs.sf$pt_count <- lengths(st_intersects(singleBuffs.sf, features2count.sf))
-        
-        numFeatures.df <- st_drop_geometry(singleBuffs.sf) %>% group_by(pt_count) %>% summarise(weights = sum(layer, na.rm = T)) |> as.data.frame()
-        
-        
-        # Get the maximum likelihood number of features as single row data.frame
-        ml_featureCount.df <- filter(numFeatures.df, weights == max(weights, na.rm = T)) |> as.data.frame()
-        # add the unique ID to the single row data.frame
-        ml_featureCount.df[[displaced.id]] <- rowDHSID
-        
-        # 
-        numFeatures.df[[displaced.id]] <- rowDHSID
-        
-        
-        
-        
-        
-      } else {
-        ml_featureCount.df <- NA
-        possibleNumFeatures.df <- NA
-      }
-      
-      return(list(ml_featureCount.df = ml_featureCount.df, possibleNumFeatures.df = numFeatures.df))
-      
-    })
+    singleBuffs.sf <- sf::st_buffer(singleDens.sf, radiusLength)
+    singleBuffs.sf$pt_count <- lengths(sf::st_intersects(singleBuffs.sf, features2count.sf))
+    
+    numFeatures.df <- sf::st_drop_geometry(singleBuffs.sf) |>
+      dplyr::group_by(pt_count) |>
+      dplyr::summarise(weights = sum(layer, na.rm = TRUE), .groups = "drop") |>
+      as.data.frame()
+    
+    ml_featureCount.df <- dplyr::filter(numFeatures.df, weights == max(weights, na.rm = TRUE)) |>
+      as.data.frame()
+    ml_featureCount.df[[displaced.id]] <- rowDHSID
+    
+    numFeatures.df[[displaced.id]] <- rowDHSID
+    
+    list(ml_featureCount.df = ml_featureCount.df, possibleNumFeatures.df = numFeatures.df)
   }
   
+  if (n.cores > 1) {
+    cl <- parallel::makeCluster(n.cores)
+    on.exit(parallel::stopCluster(cl), add = TRUE)
+    future::plan(future::cluster, workers = cl)
+    
+    numFeatures <- future.apply::future_apply(sf::st_drop_geometry(displaced.sf), 1, one_comm)
+  } else {
+    numFeatures <- apply(sf::st_drop_geometry(displaced.sf), 1, one_comm)
+  }
   
-  # tidy things up, put into a single data frame
-  #   Extract the objects of interest from the list
-  #     probableMetrics
-  ml_featureCount.list <- lapply(numFeatures, function(x) {
-    x$ml_featureCount.df
-  }) 
-  #     hfWeights
-  possibleNumFeatures.list <- lapply(numFeatures, function(x) {
-    x$possibleNumFeatures.df
-  }) 
+  ml_featureCount.df <- iotools::fdrbind(lapply(numFeatures, `[[`, "ml_featureCount.df"))
+  possibleNumFeatures.df <- iotools::fdrbind(lapply(numFeatures, `[[`, "possibleNumFeatures.df"))
   
-  rm(numFeatures)
-  
-  #   bind them into a dataframe
-  ml_featureCount.df <- iotools::fdrbind(ml_featureCount.list)
-  possibleNumFeatures.df <- iotools::fdrbind(possibleNumFeatures.list)
-  
-  rm(ml_featureCount.list, possibleNumFeatures.list)
-  
-  return(list(ml_featureCount.df = ml_featureCount.df, possibleNumFeatures.df = possibleNumFeatures.df))
+  list(ml_featureCount.df = ml_featureCount.df, possibleNumFeatures.df = possibleNumFeatures.df)
 }
