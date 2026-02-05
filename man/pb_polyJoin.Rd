@@ -15,20 +15,7 @@ pb_polyJoin(
 )
 }
 \arguments{
-\item{displaced.sf}{`sf` POINT object of displaced locations (one per ID).}
-
-\item{polygons.sf}{`sf` POLYGON/MULTIPOLYGON object to join against.}
-
-\item{displaced.id}{Unique ID column in `displaced.sf`.}
-
-\item{polygons.id}{Unique ID column in `polygons.sf`.}
-
-\item{densityBuffer}{Optional pb_densityBuffer object (from `pb_densityBuffer()`).}
-
-\item{adminBound}{Optional admin polygons used to trim kernels (passed to
-`pb_apply_densityBuffer()`).}
-
-\item{adminID}{Polygon ID column in `adminBound` (required if `adminBound` provided).}
+\item{densityBuffer}{A density buffer object created by `pb_densityBuffer()`.}
 }
 \value{
 A data.frame with columns:
