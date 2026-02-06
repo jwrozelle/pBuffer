@@ -2,23 +2,24 @@
 % Please edit documentation in R/utils_applyDensityBuffer.R
 \name{pb_apply_densityBuffer}
 \alias{pb_apply_densityBuffer}
-\title{Apply a density buffer at a point to produce an aligned weight raster}
+\title{Apply a density buffer at point(s) to produce aligned weight raster(s)}
 \usage{
 pb_apply_densityBuffer(
   point_sf,
   densityBuffer,
-  templateRaster,
+  templateRaster = NULL,
   radius_m = NULL,
   adminBound = NULL,
   adminID = "ID_2"
 )
 }
 \arguments{
-\item{point_sf}{Single-row sf POINT.}
+\item{point_sf}{sf POINT (one or more rows).}
 
 \item{densityBuffer}{pb_densityBuffer object.}
 
-\item{templateRaster}{RasterLayer used for CRS and alignment context (the join raster).}
+\item{templateRaster}{Optional raster::RasterLayer used for CRS context.
+If NULL, a minimal in-memory RasterLayer is created using point_sf's CRS.}
 
 \item{radius_m}{Optional override radius (single-kernel mode).}
 
@@ -27,9 +28,9 @@ pb_apply_densityBuffer(
 \item{adminID}{Admin ID column in adminBound.}
 }
 \value{
-A RasterLayer with weights (summing to 1 over non-NA cells), aligned near the point.
+RasterLayer (if nrow(point_sf)==1) or list of RasterLayer/NULL.
 }
 \description{
-Apply a density buffer at a point to produce an aligned weight raster
+Apply a density buffer at point(s) to produce aligned weight raster(s)
 }
 \keyword{internal}

@@ -6,39 +6,72 @@ pb__weights_raster_to_points <- function(w_raster,
   # Convert a RasterLayer of weights to an sf POINT object with a weight column.
   # Uses cell centers as candidate locations.
   #
-  # w_raster: RasterLayer with weights (probability mass or density*cell_area).
-  # drop_zeros: if TRUE, keep only strictly positive (or > min_weight) weights.
-  #
-  # Returns: sf POINT with columns: x, y, w
+  # Returns: sf POINT with columns: <weight_name> plus geometry
   
   stopifnot(inherits(w_raster, "RasterLayer"))
   
-  # raster::rasterToPoints is fast and stable for this use.
-  pts_mat <- raster::rasterToPoints(w_raster, spatial = FALSE) # columns: x, y, layer
-  if (!is.matrix(pts_mat) || nrow(pts_mat) == 0) {
-    # Return empty sf with correct columns
+  # Fast path: if all values are NA, return empty sf
+  v <- raster::values(w_raster)
+  if (is.null(v) || length(v) == 0 || all(!is.finite(v))) {
     empty <- sf::st_as_sf(
-      data.frame(x = numeric(0), y = numeric(0), w = numeric(0)),
+      data.frame(
+        x = numeric(0),
+        y = numeric(0),
+        tmp_w = numeric(0)
+      ),
       coords = c("x", "y"),
       crs = raster::crs(w_raster)
     )
-    names(empty)[names(empty) == "w"] <- weight_name
+    names(empty)[names(empty) == "tmp_w"] <- weight_name
     return(empty)
   }
   
-  colnames(pts_mat) <- c("x", "y", "w")
+  # rasterToPoints is stable and returns cell centers (x,y) + layer value.
+  # NOTE: it will materialize points for all non-NA cells.
+  pts_mat <- raster::rasterToPoints(w_raster, spatial = FALSE)
   
+  if (!is.matrix(pts_mat) || nrow(pts_mat) == 0) {
+    empty <- sf::st_as_sf(
+      data.frame(
+        x = numeric(0),
+        y = numeric(0),
+        tmp_w = numeric(0)
+      ),
+      coords = c("x", "y"),
+      crs = raster::crs(w_raster)
+    )
+    names(empty)[names(empty) == "tmp_w"] <- weight_name
+    return(empty)
+  }
+  
+  colnames(pts_mat) <- c("x", "y", "tmp_w")
+  
+  ok <- is.finite(pts_mat[, "tmp_w"])
   if (drop_zeros) {
-    pts_mat <- pts_mat[is.finite(pts_mat[, "w"]) & pts_mat[, "w"] > min_weight, , drop = FALSE]
-  } else {
-    pts_mat <- pts_mat[is.finite(pts_mat[, "w"]), , drop = FALSE]
+    ok <- ok & (pts_mat[, "tmp_w"] > min_weight)
+  }
+  pts_mat <- pts_mat[ok, , drop = FALSE]
+  
+  if (nrow(pts_mat) == 0) {
+    empty <- sf::st_as_sf(
+      data.frame(
+        x = numeric(0),
+        y = numeric(0),
+        tmp_w = numeric(0)
+      ),
+      coords = c("x", "y"),
+      crs = raster::crs(w_raster)
+    )
+    names(empty)[names(empty) == "tmp_w"] <- weight_name
+    return(empty)
   }
   
   pts_df <- as.data.frame(pts_mat)
-  names(pts_df)[names(pts_df) == "w"] <- weight_name
+  names(pts_df)[names(pts_df) == "tmp_w"] <- weight_name
   
   sf::st_as_sf(pts_df, coords = c("x", "y"), crs = raster::crs(w_raster))
 }
+
 
 #' @keywords internal
 pb__weighted_quantile <- function(x, w, probs = c(0.5)) {

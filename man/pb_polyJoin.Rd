@@ -11,11 +11,25 @@ pb_polyJoin(
   polygons.id = "SPAID",
   densityBuffer = NULL,
   adminBound = NULL,
-  adminID = NULL
+  adminID = "ID_2",
+  templateRaster = NULL,
+  min_weight = 0
 )
 }
 \arguments{
 \item{densityBuffer}{A density buffer object created by `pb_densityBuffer()`.}
+
+\item{adminBound}{Optional admin polygons used to trim the kernel to the polygon
+containing each displaced point.}
+
+\item{adminID}{ID column in `adminBound`.}
+
+\item{templateRaster}{Optional `RasterLayer` used as a template for rasterization
+(CRS/resolution/extent). If `NULL`, the function will try to use the
+densityBuffer's own raster metadata; if that is insufficient in your current
+implementation of `pb_apply_densityBuffer()`, pass a template explicitly.}
+
+\item{min_weight}{Drop candidate cells with weights <= min_weight (default 0).}
 }
 \value{
 A data.frame with columns:

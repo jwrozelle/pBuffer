@@ -12,7 +12,9 @@ pb_polyProbsJoin(
   point_id = "DHSID",
   poly_id = "ID_2",
   weight_name = "p",
-  min_weight = 0
+  min_weight = 0,
+  adminBound = NULL,
+  adminID = "ID_2"
 )
 }
 \arguments{
@@ -34,6 +36,11 @@ implementation of `pb_apply_densityBuffer()`, pass a template explicitly.}
 \item{weight_name}{Output column name for probability mass (default `"p"`).}
 
 \item{min_weight}{Drop candidate cells with weights <= min_weight (default 0).}
+
+\item{adminBound}{Optional admin polygons used to trim the kernel to the polygon
+containing each displaced point.}
+
+\item{adminID}{ID column in `adminBound`.}
 }
 \value{
 A list with:
