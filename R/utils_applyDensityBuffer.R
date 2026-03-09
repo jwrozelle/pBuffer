@@ -116,6 +116,11 @@ pb_apply_densityBuffer <- function(point_sf,
       
       Kmat <- densityBuffer$kernels[[r_key]]
       
+      if (inherits(Kmat, "table")) {
+        Kmat <- unclass(Kmat)
+        storage.mode(Kmat) <- "double"
+      }
+      
       pb_r <- raster::raster(Kmat)
       raster::crs(pb_r) <- raster::crs(templateRaster)
       

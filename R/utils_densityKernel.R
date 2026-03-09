@@ -115,7 +115,8 @@ pb_build_kernel_mc <- function(R, cell_m, kernel = c("uniform_radius", "uniform_
   
   # Build 2D table (rows=y, cols=x)
   tab <- table(by, bx)
-  M <- as.matrix(tab)
+  M <- unclass(tab)
+  storage.mode(M) <- "double"
   
   # Convert counts to probabilities
   s <- sum(M)
