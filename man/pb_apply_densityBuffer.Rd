@@ -7,7 +7,7 @@
 pb_apply_densityBuffer(
   point_sf,
   densityBuffer,
-  templateRaster = NULL,
+  templateRaster,
   radius_m = NULL,
   adminBound = NULL,
   adminID = "ID_2"

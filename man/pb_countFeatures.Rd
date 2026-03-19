@@ -9,40 +9,103 @@ pb_countFeatures(
   features2count.sf,
   radiusLength = 10000,
   displaced.id = "DHSID",
+  features2count.id = "SPAID",
   densityBuffer = NULL,
+  templateRaster = NULL,
   adminBound = NULL,
   adminID = NULL,
-  n.cores = 1
+  min_weight = 0,
+  n.cores = 1,
+  parallel = FALSE,
+  future.seed = TRUE,
+  future.scheduling = 1
 )
 }
 \arguments{
-\item{displaced.sf}{Displaced coordinates in an sf object type.}
+\item{displaced.sf}{An \code{sf} object with POINT geometries for displaced
+cluster locations.}
 
-\item{features2count.sf}{sf point feature that is counted.}
+\item{features2count.sf}{An \code{sf} object with POINT or MULTIPOINT
+geometries that should be counted within \code{radiusLength}.}
 
-\item{radiusLength}{a numeric vector to determine the distance from a displaced community within which the number of features2count.sf will be counted.}
+\item{radiusLength}{A single numeric value giving the search radius, in the
+linear units of the projected CRS (normally meters).}
 
-\item{densityBuffer}{A density buffer list object created with the pb_integratedDens function.}
+\item{displaced.id}{Column name giving the unique displaced-point ID.}
 
-\item{adminBound}{(Optional) the administrative boundary that circumscribes the displacement.}
+\item{features2count.id}{Column name giving the unique joined-feature ID.}
 
-\item{adminID}{The unique ID for the adminBound features, defaults to "ID_2".}
+\item{densityBuffer}{A density-buffer object created by
+\code{pb_densityBuffer()}, \code{pb_integratedDensity()},
+\code{pb_Density()}, \code{pb_mcDensity()}, or
+\code{pb_mcDensity_dhs()}.}
 
-\item{n.cores}{This allows for parallelization using the futures package. This can be slightly unstable, but normally functions well and dramatically speeds compute time when it does. n.cores specifies the number of cores to use. The default is 1, and does not parallelize.}
+\item{templateRaster}{Kept only for backward compatibility. It is not used by
+this implementation because the join is carried out directly on candidate
+\code{sf} points rather than through an intermediate raster object.}
+
+\item{adminBound}{Optional administrative boundary used to trim plausible true
+locations before counting. If multiple admin polygons are supplied, the
+displaced point is first matched to its containing admin polygon and only that
+polygon is used for trimming.}
+
+\item{adminID}{Column name giving the admin ID in \code{adminBound}. This is
+only required when \code{adminBound} has more than one row.}
+
+\item{min_weight}{Drop candidate true-location support points with weights less
+than or equal to this threshold before counting, then renormalize the
+remaining weights so the resulting probabilities still sum to 1.}
+
+\item{n.cores}{Number of workers to use when parallel execution is requested.}
+
+\item{parallel}{Logical. If \code{TRUE}, evaluate displaced points in
+parallel with \code{future.apply}. If \code{FALSE}, evaluation is serial
+unless \code{n.cores > 1}.}
+
+\item{future.seed}{Seed handling passed to
+\code{future.apply::future_lapply()}.}
+
+\item{future.scheduling}{Scheduling argument passed to
+\code{future.apply::future_lapply()}.}
 }
 \value{
-a vector of the most likely count of point features within a defined radius of the displaced coordinates.
+A list with three data frames:
+\describe{
+  \item{feature_probabilities}{A data frame with three columns: displaced-point
+  ID, joined-point ID, and the probability that the joined feature is within
+  \code{radiusLength} of the true location. If no joined feature has positive
+  probability mass for a displaced point, that displaced point simply
+  contributes zero rows to this table.}
+  \item{count_distribution}{A data frame with three columns: displaced-point ID,
+  count of joined features within \code{radiusLength}, and the probability of
+  observing that count. The probabilities sum to 1 within each displaced
+  point after any trimming or weight thresholding.}
+  \item{median_count}{A data frame with two columns: displaced-point ID and the
+  weighted median count of joined features within \code{radiusLength}.}
+}
 }
 \description{
-For each given displaced community, estimates the raster value based on the probability weighted mean of possible true locations
+For each displaced point, this function builds the set of plausible true
+locations implied by \code{densityBuffer}, keeps those locations as an
+\code{sf} point layer, and then counts how many joined point features fall
+within \code{radiusLength} of each plausible true location.
+
+In other words, this is a point-to-point join. I am not extracting raster
+values here, and I am not summarizing a raster surface as the substantive
+output. The only thing the function returns is the probability-weighted join
+result for point or multipoint features.
+
+The function returns three related summaries for each displaced point:
+\enumerate{
+  \item the probability that each joined feature falls within the requested
+  radius of the true location;
+  \item the probability distribution over the number of joined features that
+  fall within that radius; and
+  \item the weighted median of that count distribution.
+}
 }
 \examples{
-
 # coming soon!
-
-
-
-
 }
 \author{
 J.W. Rozelle

@@ -46,10 +46,22 @@ pb_radiusLimitJoin(
 \item{n.cores}{This allows for parallelization using the futures package. This can be slightly unstable, but normally functions well and dramatically speeds compute time when it does. n.cores specifies the number of cores to use. The default is 1, and does not parallelize.}
 }
 \value{
-a vector of the most likely count of point features within a defined radius of the displaced coordinates.
+A list with three data frames:
+\describe{
+  \item{feature_probabilities}{Columns for displaced point ID, joined point
+  ID, and the probability that the joined point is within \code{radiusLength}
+  of the true location.}
+  \item{count_distribution}{Columns for displaced point ID, the number of
+  joined points within \code{radiusLength}, and the probability of that count.}
+  \item{median_count}{Columns for displaced point ID and the weighted median
+  count across all candidate true locations.}
+}
 }
 \description{
-For each given displaced community, estimates the raster value based on the probability weighted mean of possible true locations
+For each displaced point, turns a density buffer into a weighted
+set of plausible true locations, counts nearby point features within a fixed
+radius at each candidate location, and then summarizes the resulting
+probability distribution.
 }
 \examples{
 
