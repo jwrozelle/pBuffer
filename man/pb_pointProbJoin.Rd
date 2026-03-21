@@ -2,7 +2,7 @@
 % Please edit documentation in R/join_nearest.R
 \name{pb_pointProbJoin}
 \alias{pb_pointProbJoin}
-\title{Probability-aware point-to-nearest-feature join from a density buffer}
+\title{Probability-aware nearest-point distance join under displacement uncertainty}
 \usage{
 pb_pointProbJoin(
   point_sf,
@@ -14,45 +14,148 @@ pb_pointProbJoin(
   weight_name = "p",
   min_weight = 0,
   dist_quantiles = c(0.05, 0.25, 0.5, 0.75, 0.95),
-  dist_breaks = seq(0, 20000, by = 250)
+  dist_breaks = seq(0, 20000, by = 250),
+  adminBound = NULL,
+  adminID = NULL,
+  distance_digits = NULL,
+  return_long = TRUE,
+  long_file = NULL,
+  overwrite_long_file = FALSE,
+  chunk_size = NULL,
+  n.cores = 1,
+  parallel = FALSE,
+  future.seed = TRUE,
+  future.scheduling = 1
 )
 }
 \arguments{
-\item{point_sf}{`sf` POINT layer of displaced points (one geometry per ID).}
+\item{point_sf}{An \code{sf} object with POINT geometries for displaced
+locations.}
 
-\item{feature_sf}{`sf` POINT layer of candidate nearest features (e.g., facilities).}
+\item{feature_sf}{An \code{sf} object with POINT or MULTIPOINT geometries for
+the candidate nearest features.}
 
-\item{densityBuffer}{A density buffer object from `pb_densityBuffer()`.}
+\item{densityBuffer}{A density-buffer object created by
+\code{pb_densityBuffer()}, \code{pb_integratedDensity()},
+\code{pb_Density()}, \code{pb_mcDensity()}, or
+\code{pb_mcDensity_dhs()}.}
 
-\item{templateRaster}{Optional `RasterLayer` template for `pb_apply_densityBuffer()`.}
+\item{templateRaster}{Kept only for backward compatibility. It is not used by
+this implementation because the nearest-feature join is carried out directly
+on candidate \code{sf} points.}
 
-\item{point_id}{Unique ID in `point_sf`.}
+\item{point_id}{Column name giving the unique displaced-point ID.}
 
-\item{feature_id}{Unique ID in `feature_sf`.}
+\item{feature_id}{Column name giving the unique nearest-feature ID.}
 
-\item{weight_name}{Name for probability mass column (default `"p"`).}
+\item{weight_name}{Retained only for backward compatibility with older calls
+to \code{pb_pointProbJoin()}. It is ignored by this implementation, which
+always returns a probability column named \code{probability}.}
 
-\item{min_weight}{Drop candidate cells with weights <= min_weight.}
+\item{min_weight}{Drop candidate true-location support points with weights
+less than or equal to this threshold before assigning nearest features, then
+renormalize the remaining weights so the resulting probabilities still sum to
+1.}
 
-\item{dist_quantiles}{Numeric vector of quantiles to report (default c(.05,.25,.5,.75,.95)).}
+\item{dist_quantiles}{Retained only for backward compatibility with older
+calls. It is ignored by this implementation.}
 
-\item{dist_breaks}{Numeric vector of distance breaks (in CRS units, typically meters)
-used to build a binned probability mass distribution. If NULL, no distribution is returned.}
+\item{dist_breaks}{Retained only for backward compatibility with older calls.
+It is ignored by this implementation.}
+
+\item{adminBound}{Optional administrative boundary used to trim plausible true
+locations before assigning nearest features. If multiple admin polygons are
+supplied, the displaced point is first matched to its containing admin
+polygon and only that polygon is used for trimming.}
+
+\item{adminID}{Column name giving the admin ID in \code{adminBound}. This is
+only required when \code{adminBound} has more than one row.}
+
+\item{distance_digits}{Optional single numeric value passed to
+\code{round(x, digits = distance_digits)} when aggregating nearest distances
+for the long output and for the maximum-likelihood distance. Use
+\code{NULL} to keep exact distances, positive values for decimal places,
+\code{0} for whole meters, and negative values for coarser buckets such as
+10 m or 100 m.}
+
+\item{return_long}{Logical. If \code{TRUE}, return the long
+feature-distance-probability table in memory. If \code{FALSE}, skip storing
+it in memory.}
+
+\item{long_file}{Optional file path for writing the long table to disk in
+chunked CSV form. This is useful when the long output is too large to keep in
+memory. If supplied together with \code{return_long = TRUE}, the long table
+is both written to disk and returned in memory.}
+
+\item{overwrite_long_file}{Logical. If \code{TRUE} and \code{long_file}
+already exists, overwrite it. If \code{FALSE}, error instead.}
+
+\item{chunk_size}{Optional number of displaced points to process per chunk.
+If \code{NULL}, the function chooses a default that is conservative when the
+long table is requested and otherwise processes everything in one chunk.}
+
+\item{n.cores}{Number of workers to use when parallel execution is requested.}
+
+\item{parallel}{Logical. If \code{TRUE}, evaluate displaced points in
+parallel with \code{future.apply}. If \code{FALSE}, evaluation is serial
+unless \code{n.cores > 1}.}
+
+\item{future.seed}{Seed handling passed to
+\code{future.apply::future_lapply()}.}
+
+\item{future.scheduling}{Scheduling argument passed to
+\code{future.apply::future_lapply()}.}
 }
 \value{
-A list with:
-  - `probs_long`: (point_id, feature_id, p)
-  - `map_nearest`: (point_id, feature_id, p)
-  - `dist_summary`: (point_id, w_mean_dist, w_median_dist, q05.., q95..)
-  - `dist_distribution`: (point_id, bin_lo, bin_hi, p) if dist_breaks supplied; else NULL
+A list with three elements:
+\describe{
+  \item{nearest_distance_probabilities}{A data frame with four columns:
+  displaced-point ID, nearest-feature ID, nearest distance in meters, and the
+  probability for that feature-distance pair. If \code{return_long = FALSE},
+  this element is returned as \code{NULL}. If \code{long_file} is supplied,
+  this same table is also written to disk in chunks.}
+  \item{median_distance}{A data frame with two columns: displaced-point ID
+  and the probability-weighted median nearest distance in meters.}
+  \item{max_likely_distance}{A data frame with three columns:
+  displaced-point ID, the maximum-likelihood nearest distance in meters after
+  optional rounding via \code{distance_digits}, and the probability mass of
+  that distance bucket.}
+}
 }
 \description{
-For each displaced point, applies a `densityBuffer` to obtain a probability
-surface of plausible true locations. Each candidate location deterministically
-maps to a nearest feature (by Euclidean distance in the projected CRS).
-We then aggregate candidate weights by feature to obtain a probability
-distribution over "true nearest feature".
+For each displaced point, this function builds the set of plausible true
+locations implied by \code{densityBuffer}, treats those as weighted candidate
+\code{sf} points, and then assigns each candidate location to its nearest
+point or multipoint feature.
 
-Also returns probability-weighted distance summaries and a lightweight
-distance distribution (binned probability mass by distance).
+The function then summarizes that nearest-feature assignment in three ways:
+\enumerate{
+  \item an optional long table giving the displaced-point ID, nearest-feature
+  ID, nearest distance in meters, and the probability mass for that
+  feature-distance pair;
+  \item a one-row summary per displaced point giving the probability-weighted
+  median nearest distance; and
+  \item a one-row summary per displaced point giving the most likely nearest
+  distance after optional rounding or bucketing with \code{round()}.
+}
+
+A few implementation choices are deliberate here.
+
+First, I am not routing this through an intermediate raster join anymore.
+I reconstruct the candidate support directly as weighted \code{sf} points,
+which is both clearer and usually lighter on memory.
+
+Second, the long table can get large if you keep exact distances. So I let
+you control whether it is returned at all, whether it is also streamed to
+disk chunk-by-chunk, and whether distances are rounded before aggregation.
+If you want a stable, interpretable mode and a smaller long table, it is a
+good idea to set \code{distance_digits} to something like \code{-1} or
+\code{-2} so the mode is calculated on 10 m or 100 m buckets rather than on
+essentially exact distances.
+}
+\examples{
+# coming soon!
+}
+\author{
+J.W. Rozelle
 }
